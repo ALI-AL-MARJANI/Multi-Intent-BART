@@ -260,21 +260,3 @@ training:
 - **Teacher forcing**: position-integer tokens in `decoder_input_ids` are
   replaced by the corresponding wordpieces (paper §3.1).
 
----
-
-## Citation
-
-```bibtex
-@article{li2026gemis,
-  title   = {A Generative Model for Joint Multiple Intent Detection and Slot Filling},
-  author  = {Li, Liz and Zhu, Wei},
-  journal = {arXiv preprint arXiv:2602.08322},
-  year    = {2026}
-}
-```
-
----
-
-## License
-
-MIT — see [`LICENSE`](LICENSE).
