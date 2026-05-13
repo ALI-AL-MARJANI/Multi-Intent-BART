@@ -1,4 +1,4 @@
-# GEMIS — Generative Model for Joint Multiple Intent Detection and Slot Filling
+# GEMIS : Generative Model for Joint Multiple Intent Detection and Slot Filling
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.9%2B-blue?logo=python" />
@@ -6,9 +6,8 @@
   <img src="https://img.shields.io/badge/Transformers-4.40%2B-FFD21E?logo=huggingface" />
   <img src="https://img.shields.io/badge/License-MIT-green" />
 </p>
-
-> **Full PyTorch implementation** of  
-> *"A Generative Model for Joint Multiple Intent Detection and Slot Filling"*  
+ 
+"A Generative Model for Joint Multiple Intent Detection and Slot Filling" :  
 > Li & Zhu (2026) — [arXiv:2602.08322](https://arxiv.org/abs/2602.08322)
 
 ---
