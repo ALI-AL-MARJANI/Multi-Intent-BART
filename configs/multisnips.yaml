@@ -1,0 +1,35 @@
+experiment_name: "gemis-multisnips"
+
+model:
+  backbone: "facebook/bart-large"
+  mlp_hidden: 512
+
+data:
+  train_path: "data/processed/multisnips/train.txt"
+  dev_path:   "data/processed/multisnips/dev.txt"
+  test_path:  "data/processed/multisnips/test.txt"
+  max_source_length: 192
+  max_target_length: 192
+
+construct:
+  source_train: "data/raw/snips/train.txt"
+  source_dev:   "data/raw/snips/dev.txt"
+  source_test:  "data/raw/snips/test.txt"
+  tau: 0.5
+  bert_model: "bert-base-uncased"
+  target_train_size: 45000
+  target_dev_size: 2500
+  target_test_size: 2500
+
+training:
+  learning_rate: 2e-5
+  batch_size: 16
+  max_epochs: 30
+  warmup_steps: 200
+  gradient_clip: 1.0
+  device: "cuda"
+  seed: 42
+
+output:
+  checkpoint_dir: "checkpoints/multisnips"
+  log_level: "INFO"

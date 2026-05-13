@@ -1,0 +1,36 @@
+experiment_name: "gemis-multiatis"
+
+model:
+  backbone: "facebook/bart-large"
+  mlp_hidden: 512
+
+data:
+  train_path: "data/processed/multiatis/train.txt"
+  dev_path:   "data/processed/multiatis/dev.txt"
+  test_path:  "data/processed/multiatis/test.txt"
+  max_source_length: 192
+  max_target_length: 192
+
+construct:
+  # Algorithm 1 settings
+  source_train: "data/raw/atis/train.txt"
+  source_dev:   "data/raw/atis/dev.txt"
+  source_test:  "data/raw/atis/test.txt"
+  tau: 0.5
+  bert_model: "bert-base-uncased"
+  target_train_size: 18000
+  target_dev_size: 1000
+  target_test_size: 1000
+
+training:
+  learning_rate: 2e-5
+  batch_size: 16
+  max_epochs: 30
+  warmup_steps: 200
+  gradient_clip: 1.0
+  device: "cuda"
+  seed: 42
+
+output:
+  checkpoint_dir: "checkpoints/multiatis"
+  log_level: "INFO"

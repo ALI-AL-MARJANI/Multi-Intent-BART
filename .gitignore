@@ -1,0 +1,77 @@
+# ===== PROJECT MEMORY =====
+claude.md
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.eggs/
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ===== Virtual environments =====
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# ===== Jupyter =====
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# ===== PyTorch / ML artifacts =====
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
+checkpoints/
+runs/
+outputs/
+logs/
+wandb/
+mlruns/
+
+# ===== Data (large files) =====
+data/raw/
+data/processed/
+*.csv
+*.tsv
+*.json
+*.jsonl
+!configs/*.yaml
+!configs/*.json
+
+# ===== HuggingFace cache =====
+.cache/
+huggingface/
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# ===== Ruff / Black / Mypy =====
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# ===== Coverage =====
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml

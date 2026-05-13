@@ -1,0 +1,25 @@
+experiment_name: "gemis-mixatis"
+
+model:
+  backbone: "facebook/bart-large"
+  mlp_hidden: 512
+
+data:
+  train_path: "data/raw/MixATIS_clean/train.txt"
+  dev_path:   "data/raw/MixATIS_clean/dev.txt"
+  test_path:  "data/raw/MixATIS_clean/test.txt"
+  max_source_length: 128
+  max_target_length: 128
+
+training:
+  learning_rate: 2e-5
+  batch_size: 16
+  max_epochs: 30
+  warmup_steps: 200
+  gradient_clip: 1.0
+  device: "cuda"
+  seed: 42
+
+output:
+  checkpoint_dir: "checkpoints/mixatis"
+  log_level: "INFO"
