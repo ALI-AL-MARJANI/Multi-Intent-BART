@@ -159,10 +159,15 @@ class GEMISModel(nn.Module):
         encoder_embeddings = self.bart.model.shared(input_ids)  # (B, N, D)
 
         # ── decode (BART decoder with AoA) ────────────────────────────────────
+        # use_cache=False: we never use the KV-cache (full sequence passed each
+        # step in generate(), teacher forcing in forward). Disabling it also
+        # avoids an IndexError on transformers versions that expect the layer to
+        # return a present_key_value at output[1].
         decoder_outputs = self.bart.model.decoder(
             input_ids=decoder_input_ids,
             encoder_hidden_states=encoder_hidden,
             encoder_attention_mask=attention_mask,
+            use_cache=False,
         )
         decoder_hidden = decoder_outputs.last_hidden_state  # (B, T, D)
 
@@ -301,6 +306,7 @@ class GEMISModel(nn.Module):
                 input_ids=decoder_input,
                 encoder_hidden_states=encoder_hidden,
                 encoder_attention_mask=attention_mask,
+                use_cache=False,
             )
             dec_hidden = dec_out.last_hidden_state  # (B, t, D)
 
