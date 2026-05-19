@@ -337,6 +337,13 @@ class GEMISModel(nn.Module):
             # tokens for the NEXT DECODER INPUT
             dec_tokens = next_ids.clone()
 
+            # Non-pointer logit indices are in [N, N+L) — shift back to vocab [0, L)
+            # so the embedding lookup doesn't go out of bounds.
+            not_ptr = ~is_ptr
+            if not_ptr.any():
+                out_tokens[not_ptr] = (next_ids[not_ptr] - N).clamp(min=0)
+                dec_tokens[not_ptr] = (next_ids[not_ptr] - N).clamp(min=0)
+
             if is_ptr.any():
                 for b in range(B):
                     if not is_ptr[b]:
