@@ -97,6 +97,7 @@ class GEMISTrainer:
         n_batches = 0
 
         for batch in self.train_loader:
+            batch.pop("words", None)  # list[list[str]], not a tensor
             batch = {k: v.to(self.device) for k, v in batch.items()}
 
             self.optimizer.zero_grad()
