@@ -178,11 +178,6 @@ pip install ollama
 # then install ollama CLI from https://ollama.com and pull a small model:
 ollama pull llama3.2:1b
 ```
-
-> **macOS note:** always prefix commands with `USE_TF=0` — TensorFlow is
-> detected by transformers but broken on Apple Silicon. Example:
-> `USE_TF=0 python scripts/train.py --config configs/mixsnips.yaml`
-
 ---
 
 ## Quick Start
@@ -274,13 +269,10 @@ for i, (gen_ids, entropies) in enumerate(
     decoded = tokenizer.decode(gen_ids, skip_special_tokens=False)
     print(f"[{i}] {'OOD ⚠' if is_ood else 'OK ✓'}  score={score:.3f}  →  {decoded[:60]}")
 
-# [0] OK ✓  score=1.24  →  <intent:PlayMusic> 2 4 <slot:music_item> ...
-# [1] OOD ⚠  score=9.71  →  (abstained — high entropy at intent positions)
-```
 
 ---
 
-## How the OOD detection works (explained simply)
+## How the OOD detection works : 
 
 When GEMIS decodes a sequence, the first tokens it generates are the intent labels (e.g. `<intent:PlayMusic>`). At each of those steps, the model produces a probability distribution over the entire vocabulary.
 
@@ -296,36 +288,6 @@ Calibration set (in-domain dev split)
 Test time
     → compute entropy score → compare to threshold → OOD or not
 ```
-
----
-
-## Data Preparation
-
-### Option A — MixATIS / MixSNIPS (pre-built, recommended)
-
-```bash
-USE_TF=0 python scripts/download_data.py --dataset mixatis  --output data/raw/
-USE_TF=0 python scripts/download_data.py --dataset mixsnips --output data/raw/
-```
-
-Sizes: MixATIS (13,162 / 759 / 828), MixSNIPS (39,776 / 2,198 / 2,199).
-
-### Option B — Build MultiATIS / MultiSNIPS (Algorithm 1)
-
-```bash
-# 1. Download single-intent sources
-USE_TF=0 python scripts/download_data.py --dataset atis  --output data/raw/
-USE_TF=0 python scripts/download_data.py --dataset snips --output data/raw/
-
-# 2. Run NSP construction
-USE_TF=0 python scripts/construct_dataset.py \
-    --input  data/raw/atis/train.txt \
-    --output data/processed/multiatis/ \
-    --tau    0.5 \
-    --bert   bert-base-uncased
-```
-
-**Algorithm 1 in brief:** for each source utterance, sample intent count `n ∈ {1,2,3}` with probabilities `(0.3, 0.5, 0.2)`. Concatenate a candidate if `P_NSP(u_m ‖ u_c) > τ`, joining with "and" or "and then".
 
 ---
 
@@ -346,30 +308,6 @@ training:
   device: cuda                    # use "cpu" for CPU-only machines
   seed: 42
 ```
-
----
-
-## Evaluation Metrics
-
-| Metric | Definition |
-|--------|-----------|
-| **Slot F1** | Micro-F1 over exact spans `(start, end_exclusive, type)` |
-| **Intent Accuracy** | Exact-set match of predicted vs. gold intent set |
-| **Overall Accuracy** | Full frame exact match (intents **and** all slots) |
-| **AUROC** | OOD — area under ROC curve |
-| **FPR@95TPR** | OOD — false positive rate when 95% of OOD samples are detected |
-| **AUPR** | OOD — area under precision-recall curve |
-
----
-
-## Key Implementation Notes
-
-- **Transformers ≥ 4.40 API**: `BartAttention.forward()` returns 2 values; `Cache` is updated in-place. `GEMISDecoderLayer` handles both the new self-attention API and the legacy interface for `AoACrossAttention`.
-- **Eager attention**: forced via `_attn_implementation = "eager"` so SAM weight tensors are always returned (SDPA silently returns `None` for `output_attentions=True`).
-- **Word-boundary decoding**: `generate()` accepts `input_words_batch` for exact first-subword position mapping; falls back to `enc_pos − 1` (valid for >95% of single-subword words in ATIS/SNIPS).
-- **Conformal guarantee**: `ConformalCalibrator` uses the finite-sample corrected quantile `⌈(n+1)(1−α)⌉ / n` — the guarantee holds even for small calibration sets.
-- **No retraining for OOD**: the entire OOD module operates at inference time. A trained GEMIS checkpoint + a calibration run on the dev split is all that is needed.
-
 ---
 
 ## Citation
