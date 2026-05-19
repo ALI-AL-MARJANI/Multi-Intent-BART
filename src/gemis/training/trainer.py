@@ -130,11 +130,13 @@ class GEMISTrainer:
 
         with torch.no_grad():
             for batch in self.dev_loader:
+                words_batch = batch.pop("words", None)  # list[list[str]], not a tensor
                 batch = {k: v.to(self.device) for k, v in batch.items()}
 
                 generated = self.model.generate(
                     input_ids=batch["input_ids"],
                     attention_mask=batch["attention_mask"],
+                    input_words_batch=words_batch,
                 )
 
                 for i, gen_ids in enumerate(generated):

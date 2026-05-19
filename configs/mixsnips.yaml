@@ -5,9 +5,9 @@ model:
   mlp_hidden: 512
 
 data:
-  train_path: "data/raw/MixSNIPS_clean/train.txt"
-  dev_path:   "data/raw/MixSNIPS_clean/dev.txt"
-  test_path:  "data/raw/MixSNIPS_clean/test.txt"
+  train_path: "data/raw/mixsnips/train.txt"
+  dev_path:   "data/raw/mixsnips/dev.txt"
+  test_path:  "data/raw/mixsnips/test.txt"
   max_source_length: 128
   max_target_length: 128
 

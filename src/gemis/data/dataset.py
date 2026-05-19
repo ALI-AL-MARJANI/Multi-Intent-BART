@@ -223,6 +223,7 @@ class GEMISDataset(Dataset):
             "labels": labels,
             "decoder_input_ids": decoder_input_ids,
             "pointer_targets": pointer_targets,
+            "words": sample.words,  # kept as list[str] for word-boundary decoding
         }
 
     # ── internals ─────────────────────────────────────────────────────────────

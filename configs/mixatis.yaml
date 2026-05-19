@@ -5,9 +5,9 @@ model:
   mlp_hidden: 512
 
 data:
-  train_path: "data/raw/MixATIS_clean/train.txt"
-  dev_path:   "data/raw/MixATIS_clean/dev.txt"
-  test_path:  "data/raw/MixATIS_clean/test.txt"
+  train_path: "data/raw/mixatis/train.txt"
+  dev_path:   "data/raw/mixatis/dev.txt"
+  test_path:  "data/raw/mixatis/test.txt"
   max_source_length: 128
   max_target_length: 128
 
