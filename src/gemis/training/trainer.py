@@ -7,6 +7,7 @@ Teacher forcing is applied during training; greedy decoding at evaluation.
 from __future__ import annotations
 
 import logging
+import signal
 from pathlib import Path
 
 import torch
@@ -72,12 +73,20 @@ class GEMISTrainer:
         )
 
         self.best_overall_acc: float = -1.0
+        self._stop_requested = False
+        signal.signal(signal.SIGINT, self._handle_sigint)
 
     # ── public API ─────────────────────────────────────────────────────────────
 
     def train(self) -> None:
         for epoch in range(1, self.num_epochs + 1):
             train_loss = self._train_epoch(epoch)
+
+            if self._stop_requested:
+                logger.info("Ctrl+C received — saving last.pt and stopping.")
+                self._save_checkpoint("last.pt")
+                return
+
             metrics = self._evaluate()
 
             logger.info(
@@ -156,6 +165,10 @@ class GEMISTrainer:
                     preds.append(parse_target_sequence(gen_ids, tokenizer))
 
         return compute_metrics(golds, preds)
+
+    def _handle_sigint(self, signum, frame) -> None:
+        logger.info("Ctrl+C caught — will save checkpoint after current epoch.")
+        self._stop_requested = True
 
     def _save_checkpoint(self, filename: str) -> None:
         path = self.output_dir / filename
