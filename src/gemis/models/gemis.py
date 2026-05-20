@@ -56,8 +56,10 @@ class GEMISModel(nn.Module):
         self.slot_labels = slot_labels
 
         # ── load BART backbone ────────────────────────────────────────────────
+        # use_safetensors=True: avoids torch.load entirely (CVE-2025-32434 check
+        # in transformers ≥4.53 blocks torch<2.6, safetensors has no such restriction)
         self.bart: BartForConditionalGeneration = (
-            BartForConditionalGeneration.from_pretrained(backbone_name)
+            BartForConditionalGeneration.from_pretrained(backbone_name, use_safetensors=True)
         )
         config: BartConfig = self.bart.config
 
