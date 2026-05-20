@@ -88,7 +88,8 @@ print(f"   pointer steps in target: {n_ptr}")
 
 # collate a batch
 collator = GEMISDataCollator(tokenizer=tokenizer)
-batch = collator([ds[i] for i in range(4)])
+items = [ds[i] for i in range(4)]
+batch = collator(items)
 print(f"   batch input_ids  : {batch['input_ids'].shape}")
 print(f"   batch labels     : {batch['labels'].shape}")
 
@@ -114,6 +115,7 @@ print(f"   All encoder_attn → AoA         : {enc_ok}")
 
 # ── 6. forward pass ───────────────────────────────────────────────────────────
 print("\n[6] Forward pass …")
+words_batch = batch.pop("words", None)
 batch_dev = {k: v for k, v in batch.items()}
 with torch.no_grad():
     out = model(
@@ -140,6 +142,7 @@ with torch.no_grad():
         input_ids=batch_dev['input_ids'][:2],
         attention_mask=batch_dev['attention_mask'][:2],
         max_new_tokens=40,
+        input_words_batch=words_batch[:2] if words_batch else None,
     )
 
 for i, gen_ids in enumerate(generated):

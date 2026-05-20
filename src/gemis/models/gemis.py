@@ -56,8 +56,10 @@ class GEMISModel(nn.Module):
         self.slot_labels = slot_labels
 
         # ── load BART backbone ────────────────────────────────────────────────
+        # use_safetensors=True: avoids torch.load entirely (CVE-2025-32434 check
+        # in transformers ≥4.53 blocks torch<2.6, safetensors has no such restriction)
         self.bart: BartForConditionalGeneration = (
-            BartForConditionalGeneration.from_pretrained(backbone_name)
+            BartForConditionalGeneration.from_pretrained(backbone_name, use_safetensors=True)
         )
         config: BartConfig = self.bart.config
 
@@ -118,10 +120,15 @@ class GEMISModel(nn.Module):
             layer.__class__ = GEMISDecoderLayer
 
             # 3. Force eager attention on self_attn so SAM weights are always
-            #    returned (SDPA silently returns None for output_attentions=True)
-            if (
+            #    returned (SDPA / Flash silently returns None for output_attentions=True).
+            #    Try the direct instance attribute first (transformers ≥4.40), then
+            #    the config-based path as a fallback.
+            if hasattr(layer.self_attn, "_attn_implementation"):
+                layer.self_attn._attn_implementation = "eager"
+            elif (
                 hasattr(layer.self_attn, "config")
                 and layer.self_attn.config is not None
+                and hasattr(layer.self_attn.config, "_attn_implementation")
             ):
                 layer.self_attn.config._attn_implementation = "eager"
 
@@ -154,10 +161,15 @@ class GEMISModel(nn.Module):
         encoder_embeddings = self.bart.model.shared(input_ids)  # (B, N, D)
 
         # ── decode (BART decoder with AoA) ────────────────────────────────────
+        # use_cache=False: we never use the KV-cache (full sequence passed each
+        # step in generate(), teacher forcing in forward). Disabling it also
+        # avoids an IndexError on transformers versions that expect the layer to
+        # return a present_key_value at output[1].
         decoder_outputs = self.bart.model.decoder(
             input_ids=decoder_input_ids,
             encoder_hidden_states=encoder_hidden,
             encoder_attention_mask=attention_mask,
+            use_cache=False,
         )
         decoder_hidden = decoder_outputs.last_hidden_state  # (B, T, D)
 
@@ -231,7 +243,8 @@ class GEMISModel(nn.Module):
         attention_mask: torch.Tensor,  # (B, N)
         max_new_tokens: int = 64,
         input_words_batch: Optional[list[list[str]]] = None,
-    ) -> list[list[int]]:
+        return_scores: bool = False,
+    ) -> "list[list[int]] | dict":
         """Greedy autoregressive generation.
 
         When the pointer network selects encoder position p (absolute, BOS=0):
@@ -250,9 +263,15 @@ class GEMISModel(nn.Module):
                                 subword words, true for >95% of ATIS/SNIPS).
 
         Returns:
-            List[List[int]] — generated output token ids (one list per item),
-            where pointer steps hold the word-index integer token id, not the
-            wordpiece.
+            If return_scores=False (default): List[List[int]] — generated output
+            token ids (one list per item), where pointer steps hold the word-index
+            integer token id, not the wordpiece.
+
+            If return_scores=True: dict with keys:
+                "generated_ids" : List[List[int]] — same as above.
+                "intent_entropies": List[List[float]] — per-step softmax entropy
+                    at each intent-position decode step, one list per batch item.
+                    Empty list if no intent token was generated.
         """
         B, N = input_ids.shape
         device = input_ids.device
@@ -275,11 +294,21 @@ class GEMISModel(nn.Module):
 
         finished = torch.zeros(B, dtype=torch.bool, device=device)
 
+        # intent token id range: any token whose text starts with "<intent:"
+        intent_token_ids: set[int] = {
+            tid for tok_str, tid in tok.get_vocab().items()
+            if tok_str.startswith("<intent:")
+        }
+
+        # per-batch accumulator of entropy values at intent-position steps
+        intent_entropies: list[list[float]] = [[] for _ in range(B)]
+
         for _ in range(max_new_tokens):
             dec_out = self.bart.model.decoder(
                 input_ids=decoder_input,
                 encoder_hidden_states=encoder_hidden,
                 encoder_attention_mask=attention_mask,
+                use_cache=False,
             )
             dec_hidden = dec_out.last_hidden_state  # (B, t, D)
 
@@ -290,15 +319,32 @@ class GEMISModel(nn.Module):
                 label_embeddings=label_emb,
             )  # (B, 1, N+L)
 
+            logits_1d = logits_step.squeeze(1)   # (B, N+L)
             next_ids, is_ptr = PointerNetwork.decode_step(
-                logits_step.squeeze(1), n_input_tokens=N
+                logits_1d, n_input_tokens=N
             )  # next_ids: (B,), is_ptr: (B,) bool
+
+            # ── capture entropy at intent-position steps ──────────────────────
+            if return_scores:
+                probs = torch.softmax(logits_1d, dim=-1)  # (B, N+L)
+                # entropy H = -sum(p * log(p+eps)), clamp for numerical safety
+                entropy = -(probs * (probs + 1e-10).log()).sum(dim=-1)  # (B,)
+                for b in range(B):
+                    if not finished[b] and next_ids[b].item() in intent_token_ids:
+                        intent_entropies[b].append(entropy[b].item())
 
             # tokens for the OUTPUT sequence
             out_tokens = next_ids.clone()
 
             # tokens for the NEXT DECODER INPUT
             dec_tokens = next_ids.clone()
+
+            # Non-pointer logit indices are in [N, N+L) — shift back to vocab [0, L)
+            # so the embedding lookup doesn't go out of bounds.
+            not_ptr = ~is_ptr
+            if not_ptr.any():
+                out_tokens[not_ptr] = (next_ids[not_ptr] - N).clamp(min=0)
+                dec_tokens[not_ptr] = (next_ids[not_ptr] - N).clamp(min=0)
 
             if is_ptr.any():
                 for b in range(B):
@@ -333,5 +379,11 @@ class GEMISModel(nn.Module):
             if finished.all():
                 break
 
-        # return output (strip BOS)
-        return [output_ids[b, 1:].tolist() for b in range(B)]
+        generated = [output_ids[b, 1:].tolist() for b in range(B)]
+
+        if return_scores:
+            return {
+                "generated_ids": generated,
+                "intent_entropies": intent_entropies,
+            }
+        return generated

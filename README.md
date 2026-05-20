@@ -1,67 +1,81 @@
-# GEMIS : Generative Model for Joint Multiple Intent Detection and Slot Filling
+# GEMIS — Generative Multi-Intent NLU with Conformal OOD Detection
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.9%2B-blue?logo=python" />
+  <img src="https://img.shields.io/badge/Python-3.10%2B-blue?logo=python" />
   <img src="https://img.shields.io/badge/PyTorch-2.1%2B-EE4C2C?logo=pytorch" />
   <img src="https://img.shields.io/badge/Transformers-4.40%2B-FFD21E?logo=huggingface" />
+  <img src="https://img.shields.io/badge/Conformal_Prediction-OOD-blueviolet" />
   <img src="https://img.shields.io/badge/License-MIT-green" />
 </p>
- 
-"A Generative Model for Joint Multiple Intent Detection and Slot Filling" :  
-> Li & Zhu (2026) — [arXiv:2602.08322](https://arxiv.org/abs/2602.08322)
+
+PyTorch implementation of **GEMIS** — a seq2seq model for joint **multiple intent detection + slot filling** — extended with **calibrated out-of-distribution detection** via conformal prediction.
+
+> Based on: *"A Generative Model for Joint Multiple Intent Detection and Slot Filling"*  
+> Li & Zhu (2026) · [arXiv:2602.08322](https://arxiv.org/abs/2602.08322)
 
 ---
 
-## Overview
+## What's new in this branch
 
-Real users rarely express a single intent per utterance.  
-GEMIS handles the realistic multi-intent setting by recasting the entire SLU task as **one sequence-to-sequence problem** on top of BART:
+> **`feature/conformal-ood`** — first application of conformal prediction to a *generative* seq2seq NLU model.
+
+All prior OOD detection work in NLU assumes a discriminative classifier (BERT/softmax). GEMIS decodes intent tokens autoregressively — there is no single classification logit to read uncertainty from.
+
+**Our approach:** hook into the decoder at inference time, measure the Shannon entropy of the logit distribution at every intent-position step, and use conformal prediction to turn that signal into a *statistically guaranteed* OOD flag.
 
 ```
-Input  : "show me flights from Boston and list cities served by United"
-Target : <intent:atis_flight> <intent:atis_city> 4 5 <slot:fromloc.city_name>
-           11 13 <slot:airline_name>
+User says: "what is the speed of light?"   ← outside SNIPS/ATIS training domain
+                    ↓
+GEMIS decoder produces high-entropy logits at intent positions
+                    ↓
+OODScorer: s(x) = mean entropy over intent steps = 9.7   (high)
+                    ↓
+ConformalCalibrator: s(x) > q_{0.95} of calibration set?  → YES
+                    ↓
+{"ood": True, "p_value": 0.02}   ← model correctly abstains
 ```
 
-Two architectural contributions on top of BART:
-
-| Component | What it does |
-|---|---|
-| **Pointer Network** | Predicts slot-value spans by pointing to encoder positions rather than copying tokens into a fixed vocabulary |
-| **Attention-over-Attention (AoA)** | Replaces the BART decoder's cross-attention with `softmax(Q·K^T + SAM·CAM/√d_k)`, linking slot generation to already-predicted intents |
-
-The paper also introduces **MultiATIS** and **MultiSNIPS** — two new datasets built with BERT's NSP head to produce *coherent* multi-intent utterances, in contrast to the random concatenations in MixATIS/MixSNIPS.
+**Guarantee (Vovk et al., 2005):** `P(in-domain sample wrongly flagged as OOD) ≤ α`  
+No distributional assumptions — only exchangeability of the calibration set.
 
 ---
 
 ## Architecture
 
 ```
-Input utterance
-      │
-      ▼
-┌──────────────────────┐
-│    BART Encoder      │  ← facebook/bart-large (extended vocab)
-└──────────┬───────────┘
+Input utterance (tokenized)
+        │
+        ▼
+┌─────────────────────┐
+│    BART Encoder     │  ← facebook/bart-large (vocab extended with intent/slot tokens)
+└──────────┬──────────┘
            │  H_enc  (B, N, D)
            ▼
-┌─────────────────────────────────────────────────────────┐
-│                  Modified BART Decoder                  │
-│                                                         │
-│  ┌──────────────┐  SAM   ┌─────────────────────────┐   │
-│  │  Self-Attn   │───────►│  Attention-over-Attn    │   │
-│  │ (eager mode) │        │  A = softmax(QK^T        │   │
-│  └──────────────┘        │      + SAM·CAM / √d_k)  │   │
-│                          └───────────┬─────────────┘   │
-│                              h_dec  (B, T, D)           │
-└──────────────────────────────────────┬──────────────────┘
-                                       │
-                          ┌────────────▼────────────┐
-                          │     Pointer Network      │
-                          │  Ĥ_e = α·MLP(H_e)       │
-                          │       + (1-α)·E_x        │
-                          │  logits ∈ ℝ^{N + |V|}    │
-                          └──────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                  Modified BART Decoder                   │
+│                                                          │
+│  ┌──────────────┐  SAM   ┌──────────────────────────┐   │
+│  │  Self-Attn   │───────►│  Attention-over-Attention │   │
+│  │ (eager mode) │        │  A = softmax(QKᵀ          │   │
+│  └──────────────┘        │      + SAM·CAM / √d_k)   │   │
+│                          └──────────┬────────────────┘   │
+│                             h_dec  (B, T, D)              │
+└─────────────────────────────────────┬────────────────────┘
+                                      │
+                         ┌────────────▼────────────┐
+                         │     Pointer Network      │
+                         │  Ĥ_e = α·MLP(H_e)        │
+                         │       + (1-α)·E_x         │
+                         │  logits ∈ ℝ^{N + |V|}     │
+                         └──────────────────────────┘
+                                      │
+                    ┌─────────────────▼──────────────────┐
+                    │   OOD Module (inference-time only)  │
+                    │                                     │
+                    │  H_t = −Σ p·log p  at intent steps │
+                    │  s(x) = mean(H_t)                   │
+                    │  flag = s(x) > q_{1−α}              │
+                    └─────────────────────────────────────┘
 ```
 
 ### Target sequence format
@@ -71,20 +85,26 @@ Input utterance
 ```
 
 Position indices are **0-indexed**, **end-exclusive** (Python-slice convention).  
-Example: `words[2:5]` = "Got The Time" → target has `2 5 <slot:track>`.
+Example: `words[2:5]` = `"Got The Time"` → target contains `2 5 <slot:track>`.
 
 ---
 
-## Results
+## Results (from paper, BART-large)
 
-Reported numbers from the paper (BART-large):
+| Dataset | Slot F1 | Intent Acc | Overall Acc |
+|---------|---------|------------|-------------|
+| MixATIS | 89.2 | 81.4 | 53.4 |
+| MixSNIPS | 97.4 | 98.1 | 87.4 |
+| MultiATIS | 95.4 | 94.1 | 71.5 |
+| MultiSNIPS | 98.1 | 98.8 | 91.5 |
 
-| Dataset    | Slot F1 | Intent Acc | Overall Acc |
-|------------|---------|------------|-------------|
-| MixATIS    | 89.2    | 81.4       | 53.4        |
-| MixSNIPS   | 97.4    | 98.1       | 87.4        |
-| MultiATIS  | 95.4    | 94.1       | 71.5        |
-| MultiSNIPS | 98.1    | 98.8       | 91.5        |
+OOD detection results (once trained checkpoints are available):
+
+| Metric | Description |
+|--------|-------------|
+| **AUROC** | Area under ROC — higher is better |
+| **FPR@95TPR** | False positive rate when 95% of OOD samples are caught — lower is better |
+| **AUPR** | Area under precision-recall curve |
 
 ---
 
@@ -94,26 +114,32 @@ Reported numbers from the paper (BART-large):
 .
 ├── src/gemis/
 │   ├── data/
-│   │   ├── dataset.py        # GEMISDataset: BIO → seq2seq samples + pointer targets
-│   │   ├── construct.py      # Algorithm 1: BERT NSP-based dataset construction
-│   │   ├── tokenizer.py      # Vocabulary extension + subword-mean embedding init
-│   │   └── collator.py       # DataCollator (padding, label masking)
+│   │   ├── dataset.py          # GEMISDataset: BIO → seq2seq samples + pointer targets
+│   │   ├── construct.py        # Algorithm 1: BERT NSP-based dataset construction
+│   │   ├── tokenizer.py        # Vocabulary extension + subword-mean embedding init
+│   │   └── collator.py         # DataCollator (padding, word list pass-through)
 │   ├── models/
-│   │   ├── gemis.py          # Main model: BART + AoA injection + Pointer Network
-│   │   ├── aoa.py            # AoACrossAttention layer
-│   │   ├── bart_layer.py     # GEMISDecoderLayer (threads SAM weights into AoA)
-│   │   └── pointer.py        # PointerNetwork head (N+L logits, learnable α)
+│   │   ├── gemis.py            # Main model + generate(return_scores=True)
+│   │   ├── aoa.py              # AoACrossAttention layer
+│   │   ├── bart_layer.py       # GEMISDecoderLayer (threads SAM into AoA)
+│   │   └── pointer.py          # PointerNetwork head (N+L logits, learnable α)
+│   ├── ood/                    # ★ NEW
+│   │   ├── scorer.py           # OODScorer: entropy-based non-conformity score
+│   │   ├── calibrator.py       # ConformalCalibrator: fit / threshold / predict
+│   │   └── synthetic.py        # SyntheticOODGenerator: ollama + hardcoded fallback
 │   ├── training/
-│   │   ├── trainer.py        # Native PyTorch training loop (AdamW + warmup)
-│   │   └── metrics.py        # Slot F1, Intent Accuracy, Overall Accuracy
+│   │   ├── trainer.py          # Training loop (AdamW + warmup + word-boundary decoding)
+│   │   └── metrics.py          # Slot F1, Intent Accuracy, Overall Accuracy
 │   └── utils/
-│       ├── io.py              # File I/O, YAML config loading
-│       └── training_utils.py  # set_seed, collect_labels
+│       ├── io.py               # File I/O, YAML config loading
+│       └── training_utils.py   # set_seed, collect_labels
 ├── scripts/
-│   ├── train.py              # Training entry point
-│   ├── evaluate.py           # Evaluation on test set
-│   ├── download_data.py      # Pull MixATIS / MixSNIPS / ATIS / SNIPS
-│   └── construct_dataset.py  # Run Algorithm 1 → MultiATIS / MultiSNIPS
+│   ├── train.py                # Training entry point
+│   ├── evaluate.py             # Evaluation on test set
+│   ├── calibrate_ood.py        # ★ NEW — fit ConformalCalibrator on dev set
+│   ├── evaluate_ood.py         # ★ NEW — AUROC / FPR@95TPR / AUPR + plot
+│   ├── download_data.py        # Pull MixATIS / MixSNIPS / ATIS / SNIPS
+│   └── construct_dataset.py    # Run Algorithm 1 → MultiATIS / MultiSNIPS
 ├── configs/
 │   ├── mixatis.yaml
 │   ├── mixsnips.yaml
@@ -121,12 +147,13 @@ Reported numbers from the paper (BART-large):
 │   └── multisnips.yaml
 ├── notebooks/
 │   ├── 01_EDA_and_Data_Construction.ipynb
-│   ├── 02_Model_Training_Tutorial.ipynb
-│   └── 03_Attention_Visualization.ipynb
+│   └── 02_Model_Training_Tutorial.ipynb
 ├── tests/
-│   └── fast_smoke_test.py    # End-to-end test (no model download needed)
-├── run.sh                    # Convenience wrapper (sets USE_TF=0)
-└── Makefile                  # Common commands
+│   ├── fast_smoke_test.py      # Full pipeline test (no model download needed)
+│   └── test_ood.py             # ★ NEW — OOD module unit + integration tests
+└── data/
+    ├── raw/                    # MixATIS, MixSNIPS (gitignored)
+    └── ood/                    # Synthetic OOD utterances (gitignored)
 ```
 
 ---
@@ -136,85 +163,140 @@ Reported numbers from the paper (BART-large):
 ```bash
 git clone https://github.com/ALI-AL-MARJANI/Multi-Intent-BART.git
 cd Multi-Intent-BART
+git checkout feature/conformal-ood
 
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 
 pip install -e ".[dev]"
 ```
 
+**Optional** — local LLM for synthetic OOD generation (no API key needed):
+
+```bash
+pip install ollama
+# then install ollama CLI from https://ollama.com and pull a small model:
+ollama pull llama3.2:1b
+```
 ---
 
 ## Quick Start
 
-All commands use the `run.sh` wrapper which sets the required environment
-variables. Alternatively, prefix any command with `USE_TF=0`.
+### 1 — Download data
 
 ```bash
-# 1. Download datasets
-./run.sh scripts/download_data.py --dataset mixatis  --output data/raw/
-./run.sh scripts/download_data.py --dataset mixsnips --output data/raw/
-
-# 2. Train
-./run.sh scripts/train.py --config configs/mixatis.yaml
-
-# 3. Evaluate
-./run.sh scripts/evaluate.py \
-    --checkpoint checkpoints/mixatis/best.pt \
-    --config     configs/mixatis.yaml
+USE_TF=0 python scripts/download_data.py --dataset mixsnips --output data/raw/
 ```
 
-Or use the `Makefile` shortcuts:
+### 2 — Smoke test (no GPU, no download of BART weights needed)
 
 ```bash
-make data-mix        # download MixATIS + MixSNIPS
-make train-mixatis   # train on MixATIS
-make eval-mixatis    # evaluate best checkpoint
-make smoke           # run the fast smoke test
+USE_TF=0 python tests/fast_smoke_test.py
+```
+
+### 3 — Train
+
+```bash
+USE_TF=0 python scripts/train.py --config configs/mixsnips.yaml
+```
+
+### 4 — Evaluate NLU metrics
+
+```bash
+USE_TF=0 python scripts/evaluate.py \
+    --checkpoint checkpoints/mixsnips/best.pt \
+    --config     configs/mixsnips.yaml
+```
+
+### 5 — Calibrate OOD detector
+
+```bash
+USE_TF=0 python scripts/calibrate_ood.py \
+    --checkpoint checkpoints/mixsnips/best.pt \
+    --config     configs/mixsnips.yaml \
+    --output     checkpoints/mixsnips/ood_calibrator.pkl \
+    --alpha      0.05
+```
+
+### 6 — Evaluate OOD detection
+
+```bash
+USE_TF=0 python scripts/evaluate_ood.py \
+    --checkpoint  checkpoints/mixsnips/best.pt \
+    --config      configs/mixsnips.yaml \
+    --calibrator  checkpoints/mixsnips/ood_calibrator.pkl \
+    --plot        results/ood_calibration.png
 ```
 
 ---
 
-## Data Preparation
+## Using the OOD module in Python
 
-### Option A — MixATIS / MixSNIPS (existing datasets, ready to use)
+```python
+import torch
+from transformers import BartTokenizerFast
+from gemis.models.gemis import GEMISModel
+from gemis.ood import ConformalCalibrator, OODScorer
 
-```bash
-./run.sh scripts/download_data.py --dataset mixatis  --output data/raw/
-./run.sh scripts/download_data.py --dataset mixsnips --output data/raw/
+# Load trained model
+tokenizer = BartTokenizerFast.from_pretrained("facebook/bart-large")
+model = GEMISModel(...)
+model.load_state_dict(torch.load("checkpoints/mixsnips/best.pt")["model_state_dict"])
+model.eval()
+
+# Load pre-fitted calibrator
+calibrator = ConformalCalibrator.load("checkpoints/mixsnips/ood_calibrator.pkl")
+
+# Run inference with OOD scoring
+utterances = [
+    "play some jazz music",            # in-domain  (SNIPS: PlayMusic)
+    "what is the speed of light?",     # OOD
+]
+enc = tokenizer(utterances, return_tensors="pt", padding=True, truncation=True)
+
+with torch.no_grad():
+    result = model.generate(
+        input_ids=enc["input_ids"],
+        attention_mask=enc["attention_mask"],
+        return_scores=True,
+    )
+
+for i, (gen_ids, entropies) in enumerate(
+    zip(result["generated_ids"], result["intent_entropies"])
+):
+    score = OODScorer.score(entropies)
+    is_ood = calibrator.predict(score, alpha=0.05)
+    decoded = tokenizer.decode(gen_ids, skip_special_tokens=False)
+    print(f"[{i}] {'OOD ⚠' if is_ood else 'OK ✓'}  score={score:.3f}  →  {decoded[:60]}")
+
+
+---
+
+## How the OOD detection works : 
+
+When GEMIS decodes a sequence, the first tokens it generates are the intent labels (e.g. `<intent:PlayMusic>`). At each of those steps, the model produces a probability distribution over the entire vocabulary.
+
+- **If the utterance is in-domain** → the model is confident, distribution is peaked → **low entropy**
+- **If the utterance is OOD** → the model is confused, probability is spread across many tokens → **high entropy**
+
+We collect these entropy values on a calibration set of in-domain samples and use **conformal prediction** to set a threshold that controls the false-alarm rate at exactly `α` (e.g. 5%), with a mathematical guarantee — no tuning, no heuristics.
+
 ```
+Calibration set (in-domain dev split)
+    → collect entropy scores → sort → take 95th percentile → threshold
 
-Sizes: MixATIS (13,162 / 759 / 828 train/dev/test), MixSNIPS (39,776 / 2,198 / 2,199).
-
-### Option B — Construct MultiATIS / MultiSNIPS (Algorithm 1)
-
-```bash
-# 1. Download base single-intent datasets
-./run.sh scripts/download_data.py --dataset atis  --output data/raw/
-./run.sh scripts/download_data.py --dataset snips --output data/raw/
-
-# 2. Run NSP-based construction
-./run.sh scripts/construct_dataset.py \
-    --input  data/raw/atis/train.txt \
-    --output data/processed/multiatis/ \
-    --tau    0.5 \
-    --bert   bert-base-uncased
+Test time
+    → compute entropy score → compare to threshold → OOD or not
 ```
-
-**Algorithm 1 in brief**: for each source utterance, sample target intent count
-`n ∈ {1,2,3}` with probabilities `(0.3, 0.5, 0.2)`. Iteratively concatenate a
-candidate utterance if `P_NSP(u_m ‖ u_c) > τ` (BERT Next Sentence Prediction),
-joining with "and" or "and then".
 
 ---
 
 ## Configuration
 
-Key options (see `configs/mixatis.yaml` for a complete example):
-
 ```yaml
+# configs/mixsnips.yaml
 model:
-  backbone: facebook/bart-large   # or facebook/bart-base
+  backbone: facebook/bart-large   # or facebook/bart-base for CPU
   mlp_hidden: 512
 
 training:
@@ -223,40 +305,18 @@ training:
   max_epochs: 30
   warmup_steps: 200
   gradient_clip: 1.0
-  device: cuda
+  device: cuda                    # use "cpu" for CPU-only machines
   seed: 42
 ```
-
 ---
 
-## Evaluation Metrics
+## Citation
 
-| Metric | Definition |
-|--------|-----------|
-| **Slot F1** | Micro-averaged F1 over exact slot spans `(start, end_exclusive, type)` |
-| **Intent Accuracy** | Fraction of utterances where the predicted intent *set* equals the gold intent set (exact match) |
-| **Overall Accuracy** | Exact match of the full semantic frame (intents **and** all slots) |
-
----
-
-## Notebooks
-
-| Notebook | Content |
-|----------|---------|
-| `01_EDA_and_Data_Construction` | Dataset statistics; live BERT NSP demo showing coherent vs. random pairs |
-| `02_Model_Training_Tutorial` | Step-by-step: build model, forward pass, 10-step training, greedy decode |
-| `03_Attention_Visualization` | Extract SAM / AoA weights; heatmaps showing how intents guide slot attention |
-
----
-
-## Key Implementation Notes
-
-- **Transformers ≥ 4.40 API**: `BartAttention.forward()` returns 2 values;
-  `Cache` is updated in-place. `GEMISDecoderLayer` handles both the new
-  self-attention API and the legacy interface for `AoACrossAttention`.
-- **Eager attention**: decoder self-attention is forced to `eager` mode so
-  that weight tensors (needed for the AoA bias) are always returned.
-- **Position indices**: 0-indexed, end-exclusive.
-- **Teacher forcing**: position-integer tokens in `decoder_input_ids` are
-  replaced by the corresponding wordpieces (paper §3.1).
-
+```bibtex
+@article{li2026gemis,
+  title   = {A Generative Model for Joint Multiple Intent Detection and Slot Filling},
+  author  = {Li, ... and Zhu, ...},
+  journal = {arXiv preprint arXiv:2602.08322},
+  year    = {2026}
+}
+```

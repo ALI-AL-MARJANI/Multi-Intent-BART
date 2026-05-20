@@ -1,4 +1,4 @@
-experiment_name: "gemis-mixatis"
+experiment_name: "gemis-mixatis-t4"
 
 model:
   backbone: "facebook/bart-large"
@@ -13,7 +13,8 @@ data:
 
 training:
   learning_rate: 0.00002
-  batch_size: 16
+  batch_size: 8                    # physical batch on T4 (16 GB)
+  gradient_accumulation_steps: 2   # effective batch = 8 × 2 = 16 (same as paper)
   max_epochs: 30
   warmup_steps: 200
   gradient_clip: 1.0

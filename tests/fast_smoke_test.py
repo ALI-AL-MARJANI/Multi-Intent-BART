@@ -182,8 +182,10 @@ print(f"   AoACrossAttention injected: {enc_ok} ✓")
 print("\n[5] Forward pass …")
 ds = GEMISDataset(TRAIN_PATH, tokenizer, max_source_length=64, max_target_length=32)
 collator = GEMISDataCollator(tokenizer=tokenizer)
-batch = collator([ds[i] for i in range(4)])
+items = [ds[i] for i in range(4)]
+batch = collator(items)
 
+words_batch = batch.pop("words", None)
 with torch.no_grad():
     out = model(
         input_ids=batch['input_ids'],
@@ -207,6 +209,7 @@ with torch.no_grad():
         input_ids=batch['input_ids'][:2],
         attention_mask=batch['attention_mask'][:2],
         max_new_tokens=20,
+        input_words_batch=words_batch[:2] if words_batch else None,
     )
 
 for i, g in enumerate(gen):

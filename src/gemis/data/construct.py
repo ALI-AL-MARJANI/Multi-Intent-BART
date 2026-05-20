@@ -148,7 +148,7 @@ class MultiIntentConstructor:
         ).to(self.device)
 
         with torch.no_grad():
-            logits = self.bert_model(**inputs).logits  # (1, 2): [not_next, is_next]
+            logits = self.bert_model(**inputs).logits  # (1, 2): [IsNext, NotNext]
 
         p_is_next = torch.softmax(logits, dim=-1)[0, 0].item()
         return p_is_next
