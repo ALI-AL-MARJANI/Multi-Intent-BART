@@ -47,6 +47,7 @@ class GEMISTrainer:
         output_dir: str = "checkpoints",
         device: str = "cuda",
         gradient_clip: float = 1.0,
+        gradient_accumulation_steps: int = 1,
     ) -> None:
         self.model = model
         self.train_loader = train_loader
@@ -56,15 +57,17 @@ class GEMISTrainer:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.device = torch.device(device if torch.cuda.is_available() else "cpu")
         self.gradient_clip = gradient_clip
+        self.gradient_accumulation_steps = max(1, gradient_accumulation_steps)
 
         self.model.to(self.device)
 
-        total_steps = len(train_loader) * num_epochs
+        # scheduler counts optimizer steps (after accumulation), not raw batches
+        total_optimizer_steps = (len(train_loader) // self.gradient_accumulation_steps) * num_epochs
         self.optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-2)
         self.scheduler = get_linear_schedule_with_warmup(
             self.optimizer,
             num_warmup_steps=warmup_steps,
-            num_training_steps=total_steps,
+            num_training_steps=total_optimizer_steps,
         )
 
         self.best_overall_acc: float = -1.0
@@ -95,12 +98,14 @@ class GEMISTrainer:
         self.model.train()
         total_loss = 0.0
         n_batches = 0
+        accum = self.gradient_accumulation_steps
 
-        for batch in self.train_loader:
+        self.optimizer.zero_grad()
+
+        for step, batch in enumerate(self.train_loader):
             batch.pop("words", None)  # list[list[str]], not a tensor
             batch = {k: v.to(self.device) for k, v in batch.items()}
 
-            self.optimizer.zero_grad()
             outputs = self.model(
                 input_ids=batch["input_ids"],
                 attention_mask=batch["attention_mask"],
@@ -108,17 +113,19 @@ class GEMISTrainer:
                 labels=batch["labels"],
                 pointer_targets=batch["pointer_targets"],
             )
-            loss: torch.Tensor = outputs["loss"]
+            # scale loss so gradients are equivalent to a full-batch mean
+            loss: torch.Tensor = outputs["loss"] / accum
             loss.backward()
 
-            if self.gradient_clip > 0:
-                nn.utils.clip_grad_norm_(self.model.parameters(), self.gradient_clip)
-
-            self.optimizer.step()
-            self.scheduler.step()
-
-            total_loss += loss.item()
+            total_loss += outputs["loss"].item()
             n_batches += 1
+
+            if (step + 1) % accum == 0 or (step + 1) == len(self.train_loader):
+                if self.gradient_clip > 0:
+                    nn.utils.clip_grad_norm_(self.model.parameters(), self.gradient_clip)
+                self.optimizer.step()
+                self.scheduler.step()
+                self.optimizer.zero_grad()
 
         return total_loss / n_batches if n_batches else 0.0
 

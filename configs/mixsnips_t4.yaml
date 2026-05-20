@@ -1,0 +1,26 @@
+experiment_name: "gemis-mixsnips-t4"
+
+model:
+  backbone: "facebook/bart-large"
+  mlp_hidden: 512
+
+data:
+  train_path: "data/raw/mixsnips/train.txt"
+  dev_path:   "data/raw/mixsnips/dev.txt"
+  test_path:  "data/raw/mixsnips/test.txt"
+  max_source_length: 128
+  max_target_length: 128
+
+training:
+  learning_rate: 2e-5
+  batch_size: 8                    # physical batch on T4 (16 GB)
+  gradient_accumulation_steps: 2   # effective batch = 8 × 2 = 16 (same as paper)
+  max_epochs: 30
+  warmup_steps: 200
+  gradient_clip: 1.0
+  device: "cuda"
+  seed: 42
+
+output:
+  checkpoint_dir: "checkpoints/mixsnips"
+  log_level: "INFO"

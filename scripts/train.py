@@ -106,6 +106,7 @@ def main() -> None:
         output_dir=cfg["output"]["checkpoint_dir"],
         device=train_cfg["device"],
         gradient_clip=train_cfg["gradient_clip"],
+        gradient_accumulation_steps=train_cfg.get("gradient_accumulation_steps", 1),
     )
 
     trainer.train()
