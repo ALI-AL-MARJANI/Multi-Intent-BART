@@ -63,7 +63,7 @@ class GEMISTrainer:
 
         # scheduler counts optimizer steps (after accumulation), not raw batches
         total_optimizer_steps = (len(train_loader) // self.gradient_accumulation_steps) * num_epochs
-        self.optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=1e-2)
+        self.optimizer = AdamW(model.parameters(), lr=float(learning_rate), weight_decay=1e-2)
         self.scheduler = get_linear_schedule_with_warmup(
             self.optimizer,
             num_warmup_steps=warmup_steps,

@@ -12,7 +12,7 @@ data:
   max_target_length: 128
 
 training:
-  learning_rate: 2e-5
+  learning_rate: 0.00002
   batch_size: 8                    # physical batch on T4 (16 GB)
   gradient_accumulation_steps: 2   # effective batch = 8 × 2 = 16 (same as paper)
   max_epochs: 30

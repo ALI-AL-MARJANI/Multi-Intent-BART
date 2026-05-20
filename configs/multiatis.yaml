@@ -23,7 +23,7 @@ construct:
   target_test_size: 1000
 
 training:
-  learning_rate: 2e-5
+  learning_rate: 0.00002
   batch_size: 16
   max_epochs: 30
   warmup_steps: 200
