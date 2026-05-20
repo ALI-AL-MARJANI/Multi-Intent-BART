@@ -155,7 +155,8 @@ def main() -> None:
 
     cfg = load_config(args.config)
     set_seed(cfg["training"]["seed"])
-    device = torch.device("cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info("Using device: %s", device)
 
     # ── model ─────────────────────────────────────────────────────────────────
     data_cfg = cfg["data"]

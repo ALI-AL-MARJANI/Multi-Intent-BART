@@ -62,10 +62,11 @@ def main() -> None:
         mlp_hidden=cfg["model"]["mlp_hidden"],
     )
 
-    device = torch.device("cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     checkpoint = torch.load(args.checkpoint, map_location=device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.to(device).eval()
+    logger.info("Using device: %s", device)
     logger.info("Loaded checkpoint: %s", args.checkpoint)
 
     # ── dataloader ────────────────────────────────────────────────────────────

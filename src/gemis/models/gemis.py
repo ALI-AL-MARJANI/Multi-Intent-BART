@@ -330,8 +330,13 @@ class GEMISModel(nn.Module):
                 # entropy H = -sum(p * log(p+eps)), clamp for numerical safety
                 entropy = -(probs * (probs + 1e-10).log()).sum(dim=-1)  # (B,)
                 for b in range(B):
-                    if not finished[b] and next_ids[b].item() in intent_token_ids:
-                        intent_entropies[b].append(entropy[b].item())
+                    # next_ids[b] is a raw index in [0, N+L).
+                    # Vocab tokens occupy [N, N+L): vocab_id = next_ids[b] - N.
+                    # Pointer tokens occupy [0, N) and can never be intent labels.
+                    if not finished[b] and not is_ptr[b]:
+                        vocab_id = next_ids[b].item() - N
+                        if vocab_id in intent_token_ids:
+                            intent_entropies[b].append(entropy[b].item())
 
             # tokens for the OUTPUT sequence
             out_tokens = next_ids.clone()
