@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 from torch.optim import AdamW
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 from transformers import get_linear_schedule_with_warmup
 
 from gemis.models.gemis import GEMISModel
@@ -102,7 +103,8 @@ class GEMISTrainer:
 
         self.optimizer.zero_grad()
 
-        for step, batch in enumerate(self.train_loader):
+        pbar = tqdm(self.train_loader, desc=f"Epoch {epoch}/{self.num_epochs}", leave=False)
+        for step, batch in enumerate(pbar):
             batch.pop("words", None)  # list[list[str]], not a tensor
             batch = {k: v.to(self.device) for k, v in batch.items()}
 
@@ -126,6 +128,7 @@ class GEMISTrainer:
                 self.optimizer.step()
                 self.scheduler.step()
                 self.optimizer.zero_grad()
+                pbar.set_postfix(loss=f"{total_loss / n_batches:.4f}")
 
         return total_loss / n_batches if n_batches else 0.0
 
