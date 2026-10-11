@@ -1,0 +1,148 @@
+play O
+some O
+jazz B-genre
+music O
+and O
+book O
+a O
+table O
+for O
+two B-party_size
+in O
+lyon B-city
+PlayMusic#BookRestaurant
+
+what O
+is O
+the O
+weather O
+in O
+saint B-city
+malo I-city
+tomorrow B-date
+GetWeather
+
+add O
+moonlight B-track
+sonata I-track
+to O
+my O
+evening B-playlist
+playlist O
+AddToPlaylist
+
+book O
+a O
+table O
+for O
+four B-party_size
+at O
+chez B-restaurant
+marcel I-restaurant
+, O
+what O
+is O
+the O
+weather O
+in O
+brest B-city
+BookRestaurant#GetWeather
+
+play O
+bohemian B-track
+rhapsody I-track
+PlayMusic
+
+will O
+it O
+rain O
+in O
+nantes B-city
+next B-date
+week I-date
+and O
+then O
+play O
+some O
+rock B-genre
+GetWeather#PlayMusic
+
+add O
+yesterday B-track
+to O
+my O
+road B-playlist
+trip I-playlist
+playlist O
+and O
+play O
+it O
+AddToPlaylist#PlayMusic
+
+reserve O
+a O
+restaurant O
+in O
+rennes B-city
+for O
+six B-party_size
+tonight B-date
+BookRestaurant
+
+is O
+it O
+sunny O
+in O
+marseille B-city
+today B-date
+, O
+add O
+clair B-track
+de I-track
+lune I-track
+to O
+my O
+piano B-playlist
+playlist O
+and O
+book O
+a O
+table O
+for O
+three B-party_size
+GetWeather#AddToPlaylist#BookRestaurant
+
+play O
+some O
+classical B-genre
+music O
+PlayMusic
+
+what O
+will O
+the O
+weather O
+be O
+in O
+quimper B-city
+this B-date
+weekend I-date
+GetWeather
+
+book O
+a O
+table O
+at O
+le B-restaurant
+petit I-restaurant
+bistro I-restaurant
+tomorrow B-date
+and O
+add O
+imagine B-track
+to O
+my O
+dinner B-playlist
+playlist O
+BookRestaurant#AddToPlaylist
+
