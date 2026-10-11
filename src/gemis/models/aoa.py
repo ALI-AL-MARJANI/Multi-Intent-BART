@@ -1,136 +1,102 @@
-"""Attention-over-Attention (AoA) cross-attention layer.
+"""Attention-over-attention (AoA) cross-attention, paper section 3.3.
 
-Replaces the standard cross-attention in each BART decoder layer.
+For decoder step ``t`` in layer ``l`` (single head shown)::
 
-Paper §3.3 formula:
+    CAM = softmax(Q K_enc^T / sqrt(d_k))             cross-attention map, (T, N)
+    SAM = softmax(Q K_dec^T / sqrt(d_k) + causal)    self-attention map,  (T, T)
+    A   = softmax(Q K_enc^T / sqrt(d_k) + SAM @ CAM / sqrt(d_k))
 
-    CAM_t^l = Softmax(Q_t^l · K_enc^T)
-    SAM_t^l = (decoder self-attention weights at step t)     # passed in externally
-    A_t^l   = Softmax(Q_t^l · K_enc^T  +  (SAM_t^l · CAM_t^l) / √d_k)
-    V_t^l   = A_t^l · V_enc
+``SAM @ CAM`` averages the cross-attention maps of the previous steps, weighted
+by how much step ``t`` attends to each of them. The projection weights are the
+pretrained BART cross-attention weights; AoA adds no parameters.
 
-SAM captures "which past decoder outputs matter for the current step"; dotting
-SAM against CAM re-weights the cross-attention map toward encoder positions that
-were important for the already-predicted intents.
-
-The self-attention weights (SAM) are computed by BartAttention in the layer's
-self-attention call and forwarded here by GEMISDecoderLayer — no extra projections
-are needed and no weights are duplicated.
+Difference from the paper's Eq. 10: the paper writes the first term without
+the ``1/sqrt(d_k)`` scaling. It is kept here because the pretrained BART
+weights assume scaled dot-product attention.
 """
 
 from __future__ import annotations
 
 import math
-from typing import Optional
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 
-class AoACrossAttention(nn.Module):
-    """Multi-head AoA cross-attention.
+def additive_mask(mask: torch.Tensor | None, dtype: torch.dtype) -> torch.Tensor | None:
+    """Normalise an encoder padding mask to an additive (B, 1, 1|T, N) tensor.
 
-    Args:
-        embed_dim:  total embedding dimension (must equal BART hidden size).
-        num_heads:  number of attention heads.
-        dropout:    attention dropout probability.
-        bias:       whether to include bias in Q/K/V/out projections.
+    Accepts a (B, N) mask of 1/0 or booleans (1 = keep), or an already additive
+    4-D float mask as built by ``BartDecoder``.
     """
+    if mask is None:
+        return None
+    if mask.dim() == 2:
+        mask = mask[:, None, None, :]
+    if mask.dtype == torch.bool or not mask.is_floating_point():
+        return torch.zeros(mask.shape, dtype=dtype, device=mask.device).masked_fill(
+            ~mask.bool(), torch.finfo(dtype).min
+        )
+    return mask.to(dtype)
 
-    def __init__(
-        self,
-        embed_dim: int,
-        num_heads: int,
-        dropout: float = 0.0,
-        bias: bool = True,
-    ) -> None:
+
+class AoACrossAttention(nn.Module):
+    """Multi-head cross-attention with the AoA bias."""
+
+    def __init__(self, embed_dim: int, num_heads: int, dropout: float = 0.0, bias: bool = True) -> None:
         super().__init__()
+        if embed_dim % num_heads != 0:
+            raise ValueError("embed_dim must be divisible by num_heads")
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
         self.scale = math.sqrt(self.head_dim)
         self.dropout = dropout
-
-        assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
+        self.use_sam = True  # set to False to recover plain cross-attention
 
         self.q_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
         self.k_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
         self.v_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
         self.out_proj = nn.Linear(embed_dim, embed_dim, bias=bias)
 
-        self.attn_dropout = nn.Dropout(p=dropout)
+    @classmethod
+    def from_pretrained_attention(cls, attn: nn.Module, dropout: float) -> AoACrossAttention:
+        """Build from a ``BartAttention`` module, reusing its projection layers."""
+        aoa = cls(attn.embed_dim, attn.num_heads, dropout, bias=attn.q_proj.bias is not None)
+        aoa.q_proj, aoa.k_proj, aoa.v_proj, aoa.out_proj = (
+            attn.q_proj,
+            attn.k_proj,
+            attn.v_proj,
+            attn.out_proj,
+        )
+        return aoa
 
-    # ── helpers ───────────────────────────────────────────────────────────────
-
-    def _split_heads(self, x: torch.Tensor) -> torch.Tensor:
-        """(B, T, D) → (B, H, T, d_k)"""
-        B, T, D = x.shape
-        return x.view(B, T, self.num_heads, self.head_dim).transpose(1, 2)
-
-    def _merge_heads(self, x: torch.Tensor) -> torch.Tensor:
-        """(B, H, T, d_k) → (B, T, D)"""
-        B, H, T, dk = x.shape
-        return x.transpose(1, 2).contiguous().view(B, T, H * dk)
-
-    # ── forward ───────────────────────────────────────────────────────────────
+    def _split(self, x: torch.Tensor) -> torch.Tensor:
+        b, t, _ = x.shape
+        return x.view(b, t, self.num_heads, self.head_dim).transpose(1, 2)
 
     def forward(
         self,
-        hidden_states: torch.Tensor,          # (B, T_dec, D)  decoder states
-        key_value_states: torch.Tensor,       # (B, T_enc, D)  encoder outputs
-        attention_mask: Optional[torch.Tensor] = None,   # (B, 1, T_dec, T_enc) additive
-        past_key_value: Optional[tuple] = None,          # cached (K_enc, V_enc) 2-tuple
-        output_attentions: bool = False,
-        layer_head_mask: Optional[torch.Tensor] = None,
-        # AoA-specific: self-attention weights from the same decoder layer,
-        # shape (B, H, T_dec, T_dec), already softmax'd.
-        self_attn_weights: Optional[torch.Tensor] = None,
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor], Optional[tuple]]:
-        B, T_dec, D = hidden_states.shape
+        hidden_states: torch.Tensor,  # (B, T, D) decoder states
+        encoder_hidden_states: torch.Tensor,  # (B, N, D)
+        encoder_mask: torch.Tensor | None = None,  # additive, broadcastable to (B, H, T, N)
+        self_attn_weights: torch.Tensor | None = None,  # (B, H, T, T), rows sum to 1
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        b, t, _ = hidden_states.shape
+        q = self._split(self.q_proj(hidden_states))
+        k = self._split(self.k_proj(encoder_hidden_states))
+        v = self._split(self.v_proj(encoder_hidden_states))
 
-        # ── Q from decoder; K, V from encoder (or cache) ─────────────────────
-        Q = self._split_heads(self.q_proj(hidden_states))     # (B, H, T_dec, dk)
+        scores = torch.matmul(q, k.transpose(-1, -2)) / self.scale  # (B, H, T, N)
+        if encoder_mask is not None:
+            scores = scores + encoder_mask
 
-        if past_key_value is not None:
-            # reuse cached encoder projections (cross-attn K/V never change)
-            K, V = past_key_value
-        else:
-            K = self._split_heads(self.k_proj(key_value_states))  # (B, H, T_enc, dk)
-            V = self._split_heads(self.v_proj(key_value_states))  # (B, H, T_enc, dk)
+        if self.use_sam and self_attn_weights is not None:
+            cam = F.softmax(scores, dim=-1)  # padding already masked out
+            scores = scores + torch.matmul(self_attn_weights, cam) / self.scale
 
-        present_key_value: tuple = (K, V)  # always cache for subsequent steps
-
-        # ── standard cross-attention scores (CAM) ────────────────────────────
-        # cam_scores: (B, H, T_dec, T_enc)
-        cam_scores = torch.matmul(Q, K.transpose(-1, -2)) / self.scale
-
-        # ── AoA bias: SAM · softmax(CAM) ────────────────────────────────────
-        # self_attn_weights: (B, H, T_dec, T_dec)  — SAM from self-attention
-        # cam_soft:          (B, H, T_dec, T_enc)  — historical cross-attention
-        # product:           (B, H, T_dec, T_dec) x (B, H, T_dec, T_enc)
-        #                  → (B, H, T_dec, T_enc)  — AoA bias
-        if self_attn_weights is not None:
-            cam_soft = F.softmax(cam_scores, dim=-1)
-            aoa_bias = torch.matmul(self_attn_weights, cam_soft) / self.scale
-            cam_scores = cam_scores + aoa_bias
-
-        # ── encoder padding mask (additive) ──────────────────────────────────
-        if attention_mask is not None:
-            cam_scores = cam_scores + attention_mask
-
-        # ── softmax + dropout ─────────────────────────────────────────────────
-        attn_weights = F.softmax(cam_scores, dim=-1)   # (B, H, T_dec, T_enc)
-
-        if layer_head_mask is not None:
-            attn_weights = attn_weights * layer_head_mask.view(1, -1, 1, 1)
-
-        attn_weights = self.attn_dropout(attn_weights)
-
-        # ── context vector ────────────────────────────────────────────────────
-        attn_output = torch.matmul(attn_weights, V)    # (B, H, T_dec, dk)
-        attn_output = self._merge_heads(attn_output)   # (B, T_dec, D)
-        attn_output = self.out_proj(attn_output)
-
-        attn_weights_out = attn_weights if output_attentions else None
-        return attn_output, attn_weights_out, present_key_value
+        weights = F.softmax(scores, dim=-1)
+        dropped = F.dropout(weights, p=self.dropout, training=self.training)
+        out = torch.matmul(dropped, v).transpose(1, 2).reshape(b, t, self.embed_dim)
+        return self.out_proj(out), weights

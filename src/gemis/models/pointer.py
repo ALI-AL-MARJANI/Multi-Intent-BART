@@ -1,18 +1,14 @@
-"""Pointer Network head for GEMIS.
+"""Pointer head, paper section 3.2 (Eq. 5-6).
 
-At each decoder step t, the pointer network produces a distribution over
-N + L tokens, where:
-  - The first N positions correspond to encoder input tokens (pointer outputs).
-  - The last L positions correspond to the extended vocabulary (intent/slot labels).
+    H~ = alpha * MLP(H_e) + (1 - alpha) * E_x
+    logits_t = [ W h_t ; H~ h_t ]        ->  L label classes, then N pointers
 
-Architecture (paper §3.2):
+``H_e`` are the encoder states, ``E_x`` the input token embeddings, ``h_t`` the
+decoder state and ``W`` the embeddings of the label tokens. Padded encoder
+positions are masked out.
 
-    Ĥ_e = α · MLP(H_e) + (1 - α) · E_x
-    logits = Softmax( [Ĥ_e ⊗ h_d_t ; W ⊗ h_d_t] )
-
-where α is a learnable scalar, H_e are encoder hidden states, E_x are
-input token embeddings, h_d_t is the decoder hidden state at step t, and
-W is the label embedding matrix (rows = vocab embeddings for intent/slot labels).
+Difference from the paper: ``alpha`` is a hyperparameter there (value not
+reported); here it is ``sigmoid`` of a learned scalar initialised at 0.5.
 """
 
 from __future__ import annotations
@@ -21,85 +17,39 @@ import torch
 import torch.nn as nn
 
 
-class PointerNetwork(nn.Module):
-    """Joint pointer + label classification head.
-
-    Args:
-        hidden_size:  dimensionality of BART hidden states / embeddings.
-        vocab_size:   full vocabulary size (including added intent/slot tokens).
-        mlp_hidden:   hidden size of the MLP projecting encoder states.
-    """
-
-    def __init__(
-        self,
-        hidden_size: int,
-        vocab_size: int,
-        mlp_hidden: int = 512,
-    ) -> None:
+class PointerHead(nn.Module):
+    def __init__(self, hidden_size: int, mlp_hidden: int, dropout: float = 0.1) -> None:
         super().__init__()
-        self.hidden_size = hidden_size
-
-        # α: learnable scalar in [0,1] controlling encoder-state vs. embedding fusion
-        self.alpha_logit = nn.Parameter(torch.zeros(1))  # sigmoid(0) = 0.5
-
-        # MLP to project encoder hidden states
+        self.alpha_logit = nn.Parameter(torch.zeros(1))
         self.mlp = nn.Sequential(
             nn.Linear(hidden_size, mlp_hidden),
             nn.GELU(),
+            nn.Dropout(dropout),
             nn.Linear(mlp_hidden, hidden_size),
         )
 
-        # Label scoring: projects decoder hidden state against vocab embeddings.
-        # We do NOT create a separate weight matrix here — we reuse the model's
-        # input embedding matrix (passed at forward time) for parameter sharing.
-        # A small projection aligns decoder hidden dim with embedding dim.
-        self.decoder_proj = nn.Linear(hidden_size, hidden_size, bias=False)
-
-    # ── forward ───────────────────────────────────────────────────────────────
+    @property
+    def alpha(self) -> torch.Tensor:
+        return torch.sigmoid(self.alpha_logit)
 
     def forward(
         self,
-        encoder_hidden: torch.Tensor,    # (B, N, D)  — encoder outputs
-        encoder_embeddings: torch.Tensor, # (B, N, D)  — input token embeddings
-        decoder_hidden: torch.Tensor,    # (B, T, D)  — decoder hidden states
-        label_embeddings: torch.Tensor,  # (L, D)     — vocab embedding matrix
+        decoder_hidden: torch.Tensor,  # (B, T, D)
+        label_embeddings: torch.Tensor,  # (L, D)
+        encoder_hidden: torch.Tensor | None = None,  # (B, N, D)
+        encoder_embeddings: torch.Tensor | None = None,  # (B, N, D)
+        attention_mask: torch.Tensor | None = None,  # (B, N), 1 = real token
     ) -> torch.Tensor:
-        """Return logits of shape (B, T, N+L) over pointer positions + label vocab."""
-        alpha = torch.sigmoid(self.alpha_logit)  # scalar in (0,1)
+        """Logits over ``L`` labels, followed by ``N`` pointers if encoder states are given."""
+        label_scores = decoder_hidden @ label_embeddings.T  # (B, T, L)
+        if encoder_hidden is None:
+            return label_scores
 
-        # Fused encoder representation: (B, N, D)
-        h_enc_fused = alpha * self.mlp(encoder_hidden) + (1 - alpha) * encoder_embeddings
-
-        # Project decoder hidden: (B, T, D)
-        h_dec = self.decoder_proj(decoder_hidden)
-
-        # --- pointer scores over N input positions ---
-        # (B, T, D) × (B, N, D)^T → (B, T, N)
-        pointer_scores = torch.bmm(h_dec, h_enc_fused.transpose(1, 2))
-
-        # --- label scores over L label tokens ---
-        # label_embeddings: (L, D) → (1, D, L) for broadcasting
-        label_emb_t = label_embeddings.T.unsqueeze(0)  # (1, D, L)
-        # (B, T, D) × (1, D, L) → (B, T, L)
-        label_scores = torch.matmul(h_dec, label_emb_t)
-
-        # concatenate: (B, T, N+L)
-        logits = torch.cat([pointer_scores, label_scores], dim=-1)
-        return logits
-
-    # ── greedy decode helper ──────────────────────────────────────────────────
-
-    @staticmethod
-    def decode_step(
-        logits: torch.Tensor,    # (B, N+L)
-        n_input_tokens: int,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Split logits into pointer and label parts; return argmax of each.
-
-        Returns:
-            predicted_ids: (B,) argmax over full N+L space.
-            is_pointer:    (B,) boolean mask — True if predicted index < N.
-        """
-        predicted_ids = logits.argmax(dim=-1)
-        is_pointer = predicted_ids < n_input_tokens
-        return predicted_ids, is_pointer
+        alpha = self.alpha
+        fused = alpha * self.mlp(encoder_hidden) + (1 - alpha) * encoder_embeddings
+        pointer_scores = decoder_hidden @ fused.transpose(1, 2)  # (B, T, N)
+        if attention_mask is not None:
+            pointer_scores = pointer_scores.masked_fill(
+                attention_mask[:, None, :] == 0, torch.finfo(pointer_scores.dtype).min
+            )
+        return torch.cat([label_scores, pointer_scores], dim=-1)
