@@ -24,7 +24,7 @@ import numpy as np
 from gemis.experiment import load_experiment, load_splits, make_loader, run_name
 from gemis.models.gemis import GEMISModel
 from gemis.ood.data import load_ood_utterances
-from gemis.ood.scores import DECODER_SCORES, FEATURE_SCORES, FeatureScorer, score_loader
+from gemis.ood.scores import DECODER_SCORES, FEATURE_SCORES, FeatureScorer, encoder_features, score_loader
 from gemis.utils.env import collect_env
 from gemis.utils.io import load_raw_dataset, write_json
 from gemis.utils.training_utils import only_holdout, resolve_device, set_seed
@@ -60,15 +60,13 @@ def main() -> None:
     if holdout:
         sets["near_holdout"] = only_holdout(load_raw_dataset(cfg["data"]["test_path"]), holdout)
 
-    def run(samples):
-        loader = make_loader(
-            samples,
-            model,
-            tokenizer,
-            cfg["training"]["eval_batch_size"],
-            cfg["data"]["max_source_length"],
+    def loader_for(samples):
+        return make_loader(
+            samples, model, tokenizer, cfg["training"]["eval_batch_size"], cfg["data"]["max_source_length"]
         )
-        return score_loader(model, loader, device, cfg["training"]["max_new_tokens"])
+
+    def run(samples):
+        return score_loader(model, loader_for(samples), device, cfg["training"]["max_new_tokens"])
 
     started = time.time()
     rng = np.random.default_rng(args.seed)
@@ -77,7 +75,7 @@ def main() -> None:
         keep = rng.choice(len(fit_samples), ood_cfg["feature_bank_size"], replace=False)
         fit_samples = [fit_samples[i] for i in sorted(keep)]
     logger.info("encoding %d training utterances for the feature bank", len(fit_samples))
-    scorer = FeatureScorer(k=ood_cfg["knn_k"]).fit(run(fit_samples)["features"])
+    scorer = FeatureScorer(k=ood_cfg["knn_k"]).fit(encoder_features(model, loader_for(fit_samples), device))
 
     out_dir = args.out_root / name
     out_dir.mkdir(parents=True, exist_ok=True)

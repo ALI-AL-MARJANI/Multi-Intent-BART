@@ -92,6 +92,19 @@ class FeatureScorer:
 
 
 @torch.no_grad()
+def encoder_features(model: GEMISModel, loader: DataLoader, device: torch.device) -> np.ndarray:
+    """Mean-pooled encoder states, without decoding (used to build the feature bank)."""
+    model.eval()
+    features = []
+    for batch in loader:
+        input_ids, mask = batch["input_ids"].to(device), batch["attention_mask"].to(device)
+        hidden = model.encode(input_ids, mask)
+        weights = mask.unsqueeze(-1).to(hidden.dtype)
+        features.append(((hidden * weights).sum(1) / weights.sum(1).clamp(min=1)).float().cpu().numpy())
+    return np.concatenate(features)
+
+
+@torch.no_grad()
 def score_loader(
     model: GEMISModel,
     loader: DataLoader,

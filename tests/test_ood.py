@@ -14,7 +14,7 @@ from gemis.ood.calibrator import (
 )
 from gemis.ood.data import load_ood_utterances, normalise_utterance
 from gemis.ood.metrics import bootstrap_detection_metrics, detection_metrics
-from gemis.ood.scores import DECODER_SCORES, FeatureScorer, score_loader
+from gemis.ood.scores import DECODER_SCORES, FeatureScorer, encoder_features, score_loader
 
 
 def test_threshold_is_the_finite_sample_quantile():
@@ -105,4 +105,6 @@ def test_scores_are_identical_alone_and_in_a_batch(samples, model_and_tokenizer)
         assert np.allclose(batched["scores"][name], single["scores"][name], atol=1e-3), name
     assert np.allclose(batched["features"], single["features"], atol=1e-4)
     assert batched["frames"] == single["frames"]
+    bank = encoder_features(model, make_loader(samples, model, tokenizer, 5, 128), device)
+    assert np.allclose(bank, batched["features"], atol=1e-4)  # same features as the decoding path
     assert len(batched["texts"]) == len(samples)
