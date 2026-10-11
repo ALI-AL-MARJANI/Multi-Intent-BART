@@ -1,0 +1,13 @@
+base: _base.yaml
+experiment_name: mixatis_bart-base_no-aoa
+dataset: mixatis
+
+data:
+  train_path: data/raw/mixatis/train.txt
+  dev_path: data/raw/mixatis/dev.txt
+  test_path: data/raw/mixatis/test.txt
+
+# Ablation: stock BART cross-attention (paper row "GEMIS w/o AoA").
+model:
+  backbone: facebook/bart-base
+  use_aoa: false

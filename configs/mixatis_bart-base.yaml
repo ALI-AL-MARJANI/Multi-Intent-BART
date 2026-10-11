@@ -1,0 +1,11 @@
+base: _base.yaml
+experiment_name: mixatis_bart-base
+dataset: mixatis
+
+data:
+  train_path: data/raw/mixatis/train.txt
+  dev_path: data/raw/mixatis/dev.txt
+  test_path: data/raw/mixatis/test.txt
+
+model:
+  backbone: facebook/bart-base
