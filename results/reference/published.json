@@ -1,0 +1,24 @@
+{
+  "_note": "Numbers published by other authors, copied from the cited tables. None of them was produced by this repository.",
+  "gemis": {
+    "source": "Li & Zhu (2026), A Generative Model for Joint Multiple Intent Detection and Slot Filling, arXiv:2602.08322v2, Tables 3-5",
+    "protocol": "BART, batch size 16, 30 epochs, AdamW, learning rate chosen in {1e-5, 2e-5, 3e-5} on dev, greedy decoding; number of runs not reported",
+    "results": {
+      "mixatis":  {"bart-large": {"slot_f1": 89.2, "intent_accuracy": 81.4, "overall_accuracy": 53.4},
+                   "bart-large_no-aoa": {"slot_f1": 88.6, "intent_accuracy": 80.0, "overall_accuracy": 52.7},
+                   "bart-base": {"slot_f1": 88.5, "intent_accuracy": 81.3, "overall_accuracy": 52.5}},
+      "mixsnips": {"bart-large": {"slot_f1": 97.4, "intent_accuracy": 98.1, "overall_accuracy": 87.4},
+                   "bart-large_no-aoa": {"slot_f1": 96.7, "intent_accuracy": 97.3, "overall_accuracy": 85.1},
+                   "bart-base": {"slot_f1": 96.6, "intent_accuracy": 96.5, "overall_accuracy": 84.3}}
+    }
+  },
+  "baselines": {
+    "source": "As reported in Li & Zhu (2026), Table 3; original papers: AGIF (Qin et al., 2020, arXiv:2004.10087), GL-GIN (Qin et al., 2021, arXiv:2106.01925)",
+    "results": {
+      "mixatis":  {"AGIF": {"slot_f1": 86.7, "intent_accuracy": 74.4, "overall_accuracy": 40.8},
+                   "GL-GIN": {"slot_f1": 88.3, "intent_accuracy": 76.3, "overall_accuracy": 43.5}},
+      "mixsnips": {"AGIF": {"slot_f1": 94.2, "intent_accuracy": 95.1, "overall_accuracy": 74.2},
+                   "GL-GIN": {"slot_f1": 94.9, "intent_accuracy": 95.6, "overall_accuracy": 75.4}}
+    }
+  }
+}
