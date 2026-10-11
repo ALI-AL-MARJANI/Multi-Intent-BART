@@ -1,77 +1,31 @@
-# ===== PROJECT MEMORY =====
-claude.md
-
-# ===== Python =====
+# Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-*.egg
 *.egg-info/
-dist/
 build/
-.eggs/
-.Python
-pip-log.txt
-pip-delete-this-directory.txt
-
-# ===== Virtual environments =====
-.env
-.venv
-env/
+dist/
+.venv/
 venv/
-ENV/
-env.bak/
-venv.bak/
 
-# ===== Jupyter =====
-.ipynb_checkpoints
-*.ipynb_checkpoints/
+# Tooling caches
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.ipynb_checkpoints/
 
-# ===== PyTorch / ML artifacts =====
-*.pt
-*.pth
-*.ckpt
-*.bin
-*.safetensors
+# Model weights and training logs (results/ is tracked)
 checkpoints/
-runs/
-outputs/
 logs/
-wandb/
-mlruns/
+*.pt
+*.safetensors
 
-# ===== Data (large files) =====
+# Downloaded datasets (see scripts/download_data.py); data/ood/ is tracked
 data/raw/
 data/processed/
-*.csv
-*.tsv
-*.json
-*.jsonl
-!configs/*.yaml
-!configs/*.json
 
-# ===== HuggingFace cache =====
-.cache/
-huggingface/
-
-# ===== OS =====
+# Local, machine-specific
 .DS_Store
-Thumbs.db
-*.swp
-*.swo
 .idea/
 .vscode/
-*.sublime-project
-*.sublime-workspace
-
-# ===== Ruff / Black / Mypy =====
-.ruff_cache/
-.mypy_cache/
-.pytest_cache/
-
-# ===== Coverage =====
-htmlcov/
-.coverage
-.coverage.*
-coverage.xml
+CLAUDE.md
+claude.md
