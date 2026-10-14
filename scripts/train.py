@@ -13,7 +13,6 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
-import time
 from pathlib import Path
 
 from gemis.experiment import build_model, load_experiment, load_splits, make_loader, run_name
@@ -30,7 +29,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--seed", required=True, type=int)
-    parser.add_argument("--resume", action="store_true", help="continue from last.pt")
+    parser.add_argument("--resume", action="store_true", help="continue from last.pt if it exists")
     parser.add_argument("--max_train_samples", type=int, default=None, help="debugging only")
     parser.add_argument("--max_epochs", type=int, default=None, help="debugging only")
     args = parser.parse_args()
@@ -67,9 +66,15 @@ def main() -> None:
         train_cfg["batch_size"],
         data_cfg["max_source_length"],
         train=True,
+        pad_to_multiple_of=data_cfg["pad_to_multiple_of"],
     )
     dev_loader = make_loader(
-        splits["dev"], model, tokenizer, train_cfg["eval_batch_size"], data_cfg["max_source_length"]
+        splits["dev"],
+        model,
+        tokenizer,
+        train_cfg["eval_batch_size"],
+        data_cfg["max_source_length"],
+        pad_to_multiple_of=data_cfg["pad_to_multiple_of"],
     )
 
     checkpoint_dir = Path(cfg["output"]["checkpoint_dir"]) / name
@@ -91,13 +96,19 @@ def main() -> None:
         run_config={"config": cfg, "seed": args.seed},
         show_progress=sys.stderr.isatty(),
     )
-    if args.resume:
+    resumed_from_epoch = None
+    if args.resume and (checkpoint_dir / "last.pt").exists():
         trainer.resume(checkpoint_dir / "last.pt")
+        resumed_from_epoch = trainer.epoch
 
-    started = time.time()
-    history = trainer.train()
     suffix = "_debug" if debug else ""
     out_path = Path(cfg["output"]["results_dir"]) / f"{name}_train{suffix}.json"
+    if trainer.finished and out_path.exists():
+        # nothing is trained: keep the file (environment, resume epoch) written by the run that did the training
+        logger.info("%s is already finished; %s left unchanged", name, out_path)
+        return
+
+    history = trainer.train()
     write_json(
         {
             "experiment": cfg["experiment_name"],
@@ -112,7 +123,8 @@ def main() -> None:
             "pointer_alpha": model.pointer.alpha.item(),
             "best_epoch": trainer.best_epoch,
             "best_dev_overall_accuracy": trainer.best_metric,
-            "train_seconds": round(time.time() - started, 1),
+            "resumed_from_epoch": resumed_from_epoch,
+            "train_seconds": round(sum(h["seconds"] for h in history), 1),
             "history": history,
         },
         out_path,

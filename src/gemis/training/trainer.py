@@ -17,6 +17,7 @@ from transformers import get_linear_schedule_with_warmup
 from gemis.models.gemis import GEMISModel
 from gemis.training.evaluation import predict_frames
 from gemis.training.metrics import compute_metrics
+from gemis.utils.training_utils import release_memory
 
 logger = logging.getLogger(__name__)
 
@@ -76,13 +77,14 @@ class GEMISTrainer:
         self.epoch = 0
         self.best_metric = -1.0
         self.best_epoch = 0
+        self.finished = False
         self.history: list[dict[str, Any]] = []
 
     # ── public API ───────────────────────────────────────────────────────────
 
     def train(self) -> list[dict[str, Any]]:
         """Run until ``max_epochs`` or early stopping. Returns the per-epoch log."""
-        while self.epoch < self.max_epochs:
+        while not self.finished:
             self.epoch += 1
             started = time.time()
             train_loss = self._train_epoch()
@@ -110,11 +112,13 @@ class GEMISTrainer:
                 self.best_metric = metrics["overall_accuracy"]
                 self.best_epoch = self.epoch
                 self._save("best.pt", with_optimizer=False)
-            self._save("last.pt", with_optimizer=True)
 
-            if self.patience and self.epoch - self.best_epoch >= self.patience:
+            stalled = self.patience and self.epoch - self.best_epoch >= self.patience
+            if stalled:
                 logger.info("early stopping: no dev improvement for %d epochs", self.patience)
-                break
+            self.finished = bool(stalled) or self.epoch >= self.max_epochs
+            self._save("last.pt", with_optimizer=True, early_stopped=bool(stalled))
+            release_memory(self.device)
         return self.history
 
     def resume(self, path: str | Path) -> None:
@@ -123,10 +127,13 @@ class GEMISTrainer:
         self.model.load_state_dict(state["model_state_dict"])
         self.optimizer.load_state_dict(state["optimizer_state_dict"])
         self.scheduler.load_state_dict(state["scheduler_state_dict"])
+        if state.get("scaler_state_dict"):
+            self.scaler.load_state_dict(state["scaler_state_dict"])
         self.epoch = state["epoch"]
         self.best_metric = state["best_metric"]
         self.best_epoch = state["best_epoch"]
         self.history = state["history"]
+        self.finished = state.get("early_stopped", False) or self.epoch >= self.max_epochs
         logger.info("resumed from %s at epoch %d", path, self.epoch)
 
     # ── internals ────────────────────────────────────────────────────────────
@@ -162,15 +169,19 @@ class GEMISTrainer:
                 self.scheduler.step()
                 self.optimizer.zero_grad()
                 progress.set_postfix(loss=f"{total_loss / n_batches:.4f}")
+            if step % 200 == 0:
+                release_memory(self.device)
         return total_loss / max(n_batches, 1)
 
-    def _save(self, filename: str, with_optimizer: bool) -> None:
+    def _save(self, filename: str, with_optimizer: bool, early_stopped: bool = False) -> None:
         torch.save(
             {
                 "model_state_dict": self.model.state_dict(),
                 "model_config": self.model.export_config(),
                 "optimizer_state_dict": self.optimizer.state_dict() if with_optimizer else None,
                 "scheduler_state_dict": self.scheduler.state_dict() if with_optimizer else None,
+                "scaler_state_dict": self.scaler.state_dict() if with_optimizer else None,
+                "early_stopped": early_stopped,
                 "epoch": self.epoch,
                 "best_metric": self.best_metric,
                 "best_epoch": self.best_epoch,

@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader
 from gemis.data.dataset import Frame
 from gemis.data.decoding import decode_frame
 from gemis.models.gemis import GEMISModel
+from gemis.utils.training_utils import release_memory
 
 
 @torch.no_grad()
@@ -32,4 +33,5 @@ def predict_frames(
             preds.append(decode_frame(sequence, model.label_space, word_starts))
         golds.extend(batch["gold"])
         words.extend(batch["words"])
+        release_memory(device)
     return golds, preds, words

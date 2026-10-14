@@ -14,6 +14,10 @@ _PASSTHROUGH = ("index", "word_starts", "words", "gold")
 class GEMISDataCollator:
     pad_token_id: int
     label_pad_id: int = -100
+    # Widths are rounded up to a multiple of this value. Padding is masked, so
+    # outputs do not change; fewer distinct tensor shapes keeps the MPS graph
+    # cache small.
+    pad_to_multiple_of: int = 1
 
     def __call__(self, features: list[dict[str, Any]]) -> dict[str, Any]:
         input_ids = self._pad([f["input_ids"] for f in features], self.pad_token_id)
@@ -29,9 +33,9 @@ class GEMISDataCollator:
             batch[key] = [f[key] for f in features]
         return batch
 
-    @staticmethod
-    def _pad(sequences: list[list[int]], value: int) -> torch.Tensor:
+    def _pad(self, sequences: list[list[int]], value: int) -> torch.Tensor:
         width = max(len(s) for s in sequences)
+        width = -(-width // self.pad_to_multiple_of) * self.pad_to_multiple_of
         return torch.tensor([s + [value] * (width - len(s)) for s in sequences], dtype=torch.long)
 
 

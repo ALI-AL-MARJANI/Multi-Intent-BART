@@ -53,7 +53,12 @@ def main() -> None:
     model.to(device)
     samples = load_splits(cfg)[args.split]
     loader = make_loader(
-        samples, model, tokenizer, cfg["training"]["eval_batch_size"], cfg["data"]["max_source_length"]
+        samples,
+        model,
+        tokenizer,
+        cfg["training"]["eval_batch_size"],
+        cfg["data"]["max_source_length"],
+        pad_to_multiple_of=cfg["data"]["pad_to_multiple_of"],
     )
 
     started = time.time()

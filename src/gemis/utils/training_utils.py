@@ -31,6 +31,14 @@ def resolve_device(name: str = "auto") -> torch.device:
     return torch.device("cpu")
 
 
+def release_memory(device: torch.device) -> None:
+    """Return cached blocks to the system. The MPS allocator otherwise grows without bound."""
+    if device.type == "mps":
+        torch.mps.empty_cache()
+    elif device.type == "cuda":
+        torch.cuda.empty_cache()
+
+
 def drop_holdout(samples: list[RawSampleIO], holdout: Iterable[str]) -> list[RawSampleIO]:
     """Remove every utterance that carries at least one held-out intent."""
     held = set(holdout)

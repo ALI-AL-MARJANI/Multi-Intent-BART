@@ -33,6 +33,7 @@ from torch.utils.data import DataLoader
 from gemis.data.decoding import decode_frame
 from gemis.data.labels import LabelSpace
 from gemis.models.gemis import GEMISModel, GenerationOutput
+from gemis.utils.training_utils import release_memory
 
 DECODER_SCORES = ("intent_entropy", "first_step_msp", "sequence_nll", "intent_energy")
 FEATURE_SCORES = ("mahalanobis", "knn")
@@ -131,6 +132,7 @@ def score_loader(
         for sequence, word_starts in zip(output.sequences, batch["word_starts"]):
             frames.append(decode_frame(sequence, model.label_space, word_starts))
         texts.extend(" ".join(words) for words in batch["words"])
+        release_memory(device)
     return {
         "scores": {name: np.concatenate(values) for name, values in scores.items()},
         "features": np.concatenate(features),

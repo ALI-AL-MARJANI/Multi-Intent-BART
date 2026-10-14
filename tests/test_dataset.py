@@ -71,6 +71,13 @@ def test_collator_pads_and_masks(samples, model_and_tokenizer):
     assert (pointers < lengths).all()
 
 
+def test_padding_to_a_multiple(samples, model_and_tokenizer):
+    model, tokenizer = model_and_tokenizer
+    loader = make_loader(samples, model, tokenizer, 4, 128, train=True, pad_to_multiple_of=8)
+    for batch in loader:
+        assert batch["input_ids"].size(1) % 8 == 0 and batch["labels"].size(1) % 8 == 0
+
+
 def test_eval_dataset_tolerates_unseen_labels(samples):
     model, tokenizer = build_model(samples[:2])  # label space from two utterances only
     loader = make_loader(samples, model, tokenizer, batch_size=4, max_source_length=128)

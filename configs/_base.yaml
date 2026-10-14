@@ -11,6 +11,7 @@ model:
 data:
   max_source_length: 128     # subwords; the longest MixATIS / MixSNIPS utterance is 92
   max_position_classes: 128  # only used when use_pointer is false
+  pad_to_multiple_of: 8      # batch widths are rounded up; padding is masked, results do not change
   holdout_intents: []        # intents removed from train/dev/test (near-OOD protocol)
 
 training:

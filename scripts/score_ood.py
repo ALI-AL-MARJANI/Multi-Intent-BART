@@ -62,7 +62,12 @@ def main() -> None:
 
     def loader_for(samples):
         return make_loader(
-            samples, model, tokenizer, cfg["training"]["eval_batch_size"], cfg["data"]["max_source_length"]
+            samples,
+            model,
+            tokenizer,
+            cfg["training"]["eval_batch_size"],
+            cfg["data"]["max_source_length"],
+            pad_to_multiple_of=cfg["data"]["pad_to_multiple_of"],
         )
 
     def run(samples):
@@ -91,7 +96,7 @@ def main() -> None:
             for i, (text, frame) in enumerate(zip(result["texts"], result["frames"])):
                 writer.writerow(
                     [set_name, i, text, "#".join(sorted(frame.intents))]
-                    + [f"{scores[name][i]:.6f}" for name in (*DECODER_SCORES, *FEATURE_SCORES)]
+                    + [f"{scores[name][i]:.9g}" for name in (*DECODER_SCORES, *FEATURE_SCORES)]
                 )
             logger.info("scored %-13s n=%d", set_name, len(samples))
 

@@ -72,6 +72,7 @@ def make_loader(
     batch_size: int,
     max_source_length: int,
     train: bool = False,
+    pad_to_multiple_of: int = 1,
 ) -> DataLoader:
     dataset = GEMISDataset(
         samples,
@@ -87,7 +88,7 @@ def make_loader(
         dataset,
         batch_size=batch_size,
         shuffle=train,
-        collate_fn=GEMISDataCollator(pad_token_id=tokenizer.pad_token_id),
+        collate_fn=GEMISDataCollator(pad_token_id=tokenizer.pad_token_id, pad_to_multiple_of=pad_to_multiple_of),
     )
 
 

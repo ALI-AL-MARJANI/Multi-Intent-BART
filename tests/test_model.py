@@ -146,5 +146,10 @@ def test_resume_restores_counters(samples, tmp_path):
     make_trainer(1).train()
     trainer = make_trainer(2)
     trainer.resume(tmp_path / "last.pt")
-    assert trainer.epoch == 1 and len(trainer.history) == 1
+    assert trainer.epoch == 1 and len(trainer.history) == 1 and not trainer.finished  # 1 of 2 epochs
     assert [r["epoch"] for r in trainer.train()] == [1, 2]
+    assert trainer.finished
+
+    again = make_trainer(2)
+    again.resume(tmp_path / "last.pt")
+    assert len(again.train()) == 2  # a finished run is not trained further
