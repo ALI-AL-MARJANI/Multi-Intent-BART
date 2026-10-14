@@ -202,7 +202,7 @@ time for every table. In short:
 ```bash
 pip install -e ".[dev]"
 python scripts/download_data.py --dataset mixatis mixsnips
-pytest                                                                # 50 tests, CPU, offline
+pytest                                                                # CPU, offline, about 10 s
 sh scripts/run_experiment.sh configs/mixatis_bart-base.yaml 13 42 87  # train, evaluate, OOD-score
 python scripts/aggregate_results.py && python scripts/make_figures.py
 ```
@@ -235,7 +235,7 @@ src/gemis/
   models/           AoA cross-attention, decoder layer, pointer head, GEMISModel
   ood/              OOD scores, conformal calibration, detection metrics
   training/         trainer, evaluation loop, metrics, error analysis
-tests/              50 offline tests on a toy dataset with a tiny random BART
+tests/              offline tests on a toy dataset with a tiny random BART
 ```
 
 The tests include: the word-to-subword alignment on BART's tokenizer, an

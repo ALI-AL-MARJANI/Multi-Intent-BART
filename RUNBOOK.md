@@ -7,14 +7,16 @@ run from the repository root.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate      # Python 3.10 - 3.12
-pip install -e ".[dev]"                                 # or: pip install -r requirements-lock.txt && pip install -e . --no-deps
+pip install -e ".[dev]"                                 # Python 3.12 only: pip install -r requirements-lock.txt && pip install -e . --no-deps
 python scripts/download_data.py --dataset mixatis mixsnips   # 16 MB, from the AGIF repository
 python scripts/prepare_ood_data.py                      # already committed in data/ood/, re-run to verify
-pytest                                                  # 50 tests, about 10 s on CPU, no download
+pytest                                                  # about 10 s on CPU, no download
 ```
 
-`requirements-lock.txt` lists the versions the committed results were produced
-with (torch 2.8.0, transformers 4.57.1). On a machine where TensorFlow is
+`requirements-lock.txt` lists the versions of the direct dependencies the
+committed results were produced with (torch 2.8.0, transformers 4.57.1) on
+Python 3.12; the pinned numpy and scipy releases do not install on older
+Python versions, and transitive dependencies are not pinned. On a machine where TensorFlow is
 installed but broken, prefix commands with `USE_TF=0`.
 
 The device is chosen automatically (`cuda`, then `mps`, then `cpu`); set
@@ -31,13 +33,24 @@ The device is chosen automatically (`cuda`, then `mps`, then `cpu`); set
 | Score OOD | `python scripts/score_ood.py --config C --seed S` | `results/ood/<exp>/seed<S>/{scores.csv,meta.json}` |
 | OOD metrics | `python scripts/evaluate_ood.py --scores_dir results/ood/<exp>/seed<S>` | `results/ood/<exp>/seed<S>/{metrics.json,calibrator.json}` |
 
-An interrupted training run continues with `RESUME=1 sh scripts/run_experiment.sh ...`
-(or `scripts/train.py --resume`), which restarts from `last.pt`.
+Re-running the same command continues where it stopped: finished trainings
+are skipped, interrupted ones restart from `last.pt` (the script also resumes
+by itself, up to five times, if training crashes, e.g. when MPS runs out of
+memory). A resumed run has `resumed_from_epoch` set in its `_train.json`.
+Resuming restores the weights, optimizer and schedule but not the state of the
+random generators, so a resumed run is not bit-identical to an uninterrupted
+run with the same seed.
 
-Every JSON file records the merged config, the seed, the git SHA, a flag
-telling whether `src/`, `scripts/` or `configs/` differed from that SHA, the
-hardware and the library versions. **Commit code changes before launching a
-run**, otherwise the result is flagged `git_dirty: true`.
+Every JSON file records the merged config, the seed, the hardware, the
+library versions and two code identifiers:
+
+* `code_sha256`: a hash of `src/**/*.py` and `configs/*.yaml`. It does not
+  depend on the git history; `python -m gemis.utils.env` prints the value of
+  the current checkout, which must match the one in a result file for that
+  result to be reproducible from this checkout.
+* `git_sha`: the commit, recorded only when `src/`, `scripts/` and `configs/`
+  have no uncommitted change (otherwise `null`). Commit before launching a
+  run to get it.
 
 After any run:
 
@@ -54,7 +67,8 @@ The README tables are copies of `results/nlu/summary.md` and `results/ood/summar
 Seeds are 13, 42 and 87 everywhere (`seeds` in `configs/_base.yaml`).
 
 Time per epoch on the Apple M4 (MPS, 16 GB, fp32) is measured; see the
-`seconds` field of each `seed*_train.json`. Runs stop early after 5 epochs
+`seconds` field of each `seed*_train.json` (epochs that ran while the machine
+was busy with another job are slower). Runs stop early after 5 epochs
 without improvement of the dev overall accuracy, so the totals below are upper
 bounds for 30 epochs. T4 times were **not measured** and are rough estimates.
 
@@ -96,12 +110,16 @@ Notes for the T4:
 
 1. `results/nlu/summary.md`: a difference between two rows that is smaller
    than their standard deviations is not a difference. The McNemar table under
-   it gives a paired test per seed for each ablation.
+   it gives a paired test per seed for each ablation. The second table
+   compares dev and test accuracy and recomputes the test metrics on the
+   utterances whose labels all occur in the training split.
 2. `results/ood/summary.md`, conformal table: the "random splits of test"
    column must be at or just below alpha for every score. This is a property
    of the procedure, so a larger value means a bug. The "calibrated on dev"
    column is allowed to deviate; the `dev_vs_test_ks` field of `metrics.json`
-   tests whether dev and test scores have the same distribution.
+   tests whether dev and test scores have the same distribution, and the last
+   table of the summary splits the dev-calibrated false alarms by whether the
+   test utterance carries a label unseen in training.
 3. `seed*_test.json`, field `error_analysis`: intent-count confusion and the
    slot types with most errors.
 

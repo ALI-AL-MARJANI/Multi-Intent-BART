@@ -16,7 +16,7 @@ replaced it.
 | 4 | The output layer scored the full 50k BART vocabulary; the paper scores `N` positions plus `L` intent/slot labels. An unused, untied 51M-parameter `lm_head` was saved in every checkpoint. | Code reading against paper Eq. 6. | `PointerHead` scores `L` labels and `N` positions. |
 | 5 | Pointer scores of padded positions were not masked; the AoA cross-attention map was normalised before the padding mask. | Code reading. | Masks applied; `test_outputs_do_not_depend_on_batch_padding`. |
 | 6 | The label inventory was collected from train, dev **and test**. | Code reading. | Train split only. Consequence: 113 of 828 MixATIS test utterances carry a label that never occurs in training and cannot be fully correct. |
-| 7 | `pyproject.toml` named a build backend that does not exist; `pytest` collected zero tests; launch scripts hard-coded a remote path. | `pip install -e .` and `pytest` output. | Packaging fixed, 50 pytest tests, CI. |
+| 7 | `pyproject.toml` named a build backend that does not exist; `pytest` collected zero tests; launch scripts hard-coded a remote path. | `pip install -e .` and `pytest` output. | Packaging fixed, pytest suite, CI. |
 
 ### Numbers removed from the README
 
@@ -31,3 +31,27 @@ replaced it.
 ### Design changes
 
 See the "Differences from the paper" section of the README.
+
+### Notes on the committed runs
+
+* **`mixatis_bart-base`, seed 13.** Training crashed after epoch 6 (MPS out of
+  memory) and was resumed. Between the crash and the resume, batch padding to
+  a multiple of 8 (`data.pad_to_multiple_of`), periodic release of the MPS
+  cache and the `code_sha256` field were added. Epochs 1-6, including the
+  selected epoch 6, were therefore trained with the code of commit `4d54c01`,
+  while the result files of this seed record the `code_sha256` of the code
+  that ran epochs 7-11, the evaluation and the OOD scoring. Padding is masked
+  and `tests/test_model.py::test_outputs_do_not_depend_on_batch_padding`
+  checks that it does not change the outputs, but the recorded hash does not
+  describe the first six epochs. The `resumed_from_epoch` field of
+  `seed13_train.json` reads 11 instead of 6: `scripts/train.py` rewrote the
+  file when the finished run was invoked again. The script now leaves the
+  file of a finished run unchanged.
+* **Seeds 13, 42 and 87 were all resumed at least once** (crash or machine
+  shutdown), so none of them is bit-identical to an uninterrupted run; see
+  RUNBOOK section 1.
+* **Score precision.** `scores.csv` first stored scores with six decimals,
+  which made up to 75% of the `first_step_msp` values of the test split tied.
+  Scores are now written with nine significant digits and the three seeds
+  were re-scored.
+
