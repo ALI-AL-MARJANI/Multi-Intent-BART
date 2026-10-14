@@ -6,7 +6,8 @@
 CPU only. Writes ``metrics.json`` and ``calibrator.json`` next to the scores.
 
 For every score and OOD set: AUROC, AUPR-in, AUPR-out, FPR@95TPR with 95%
-bootstrap intervals. Conformal part, for every score and alpha:
+bootstrap intervals. ``negative_length`` (minus the number of words) is added
+as a trivial baseline: it flags short utterances and uses no model at all. Conformal part, for every score and alpha:
 
 * ``dev_calibrated``: threshold from ``id_dev``, false-alarm rate on ``id_test``
   and detection rate on each OOD set. The dev set also selects the checkpoint,
@@ -30,7 +31,8 @@ from gemis.ood.metrics import bootstrap_detection_metrics, detection_metrics
 from gemis.ood.scores import DECODER_SCORES, FEATURE_SCORES
 from gemis.utils.io import write_json
 
-SCORES = (*DECODER_SCORES, *FEATURE_SCORES)
+MODEL_SCORES = (*DECODER_SCORES, *FEATURE_SCORES)
+SCORES = (*MODEL_SCORES, "negative_length")
 ALPHAS = (0.01, 0.05, 0.1)
 
 
@@ -39,8 +41,9 @@ def read_scores(path: Path) -> dict[str, dict[str, np.ndarray]]:
     with open(path, newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
             target = sets.setdefault(row["set"], {name: [] for name in SCORES})
-            for name in SCORES:
+            for name in MODEL_SCORES:
                 target[name].append(float(row[name]))
+            target["negative_length"].append(-float(len(row["text"].split())))
     return {s: {n: np.array(v) for n, v in scores.items()} for s, scores in sets.items()}
 
 
