@@ -1,17 +1,34 @@
-# GEMIS reimplementation + conformal OOD detection
+# GEMIS, reimplemented: generative multi-intent NLU with a conformal OOD study
 
 [![CI](https://github.com/ALI-AL-MARJANI/Multi-Intent-BART/actions/workflows/ci.yml/badge.svg)](https://github.com/ALI-AL-MARJANI/Multi-Intent-BART/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+![Python 3.10 to 3.12](https://img.shields.io/badge/python-3.10%20to%203.12-blue.svg)
 
 An independent reimplementation of GEMIS (Li & Zhu, 2026), a BART model that
-generates the intents and slot spans of a multi-intent utterance as one
-sequence, and a study of out-of-distribution (OOD) detection on top of it with
-split-conformal calibration.
-
-The paper has no public code. Part 1 measures how close this reimplementation
-gets to the published numbers. Part 2 is not in the paper.
+writes the intents and slot spans of a multi-intent utterance as a single
+output sequence, followed by a study of out-of-distribution (OOD) detection on
+top of it with split-conformal calibration. The paper has no public code;
+every number below was produced by the scripts of this repository and is
+stored in [`results/`](results).
 
 ## TL;DR
+
+**Findings** (MixATIS, BART-base, 3 seeds; details in [Analysis](#analysis)):
+
+1. **The reimplementation lands close to the paper.** Intent accuracy is
+   within one standard deviation of the published BART-base number; slot F1
+   and overall accuracy are 1.1 and 1.6 points below it.
+2. **The MixATIS test split is much harder than its dev split** (overall
+   accuracy 88.8 on dev, 50.9 on test). 113 of the 828 test utterances carry a
+   label that never occurs in training, and slot errors account for most of
+   the rest.
+3. **Far-OOD detection is easy, partly for the wrong reason.** Encoder-feature
+   scores reach AUROC 0.99 against CLINC150 out-of-scope queries, but
+   utterance length alone already reaches 0.89.
+4. **The conformal false-alarm guarantee holds only when its assumption
+   holds.** Calibrated on exchangeable data, the false-alarm rate is 4.8% at
+   α = 5%; calibrated on the dev split, it is 12% to 25% on test. Most of the
+   excess comes from test utterances whose intent was never seen in training.
 
 <!-- TLDR:BEGIN -->
 Test-set results of this repository (*ours*, mean ± standard deviation over seeds) next to the numbers published by Li & Zhu (2026) (*paper*, number of runs not reported).
@@ -35,16 +52,34 @@ OOD detection, `mixatis_bart-base`, `far_clinc` (n=1000) against the in-distribu
 Setup: macOS-15.6.1-arm64-arm-64bit, 16.0 GB, device `mps`, torch 2.8.0, transformers 4.57.1; official MixATIS split (test n=828); seeds 13, 42, 87; greedy decoding. Sources: [`results/nlu/summary.json`](results/nlu/summary.json), [`results/ood/summary.json`](results/ood/summary.json). Runs that are configured but not done are listed as `TBD (run pending)` in [Results](#results).
 <!-- TLDR:END -->
 
+## Project status
+
+The project is closed at this stage. What is done and what is left:
+
+| | Experiment | Config | Status |
+|---|---|---|---|
+| ✅ | Main NLU result, MixATIS, BART-base, 3 seeds | `mixatis_bart-base` | Done |
+| ✅ | Far-OOD (CLINC150), 6 scores + length baseline, conformal validity | `mixatis_bart-base` | Done |
+| ⏳ | Main NLU result, MixSNIPS, BART-base | `mixsnips_bart-base` | Not run (about 4.5 h per seed on a T4, estimate) |
+| ⏳ | Ablations: without AoA, without pointer, random label embeddings | `mixatis_bart-base_*` | Not run (about 1.2 to 3 h per seed on an Apple M4) |
+| ⏳ | Near-OOD: two MixSNIPS intents held out of training | `mixsnips_bart-base_holdout` | Not run (about 3 h per seed on a T4, estimate) |
+| ⏳ | Paper setting, BART-large | `mix*_bart-large` | Not run (5 to 15 h per seed on a T4, estimate) |
+
+Every pending row has a config, a one-line command in [`RUNBOOK.md`](RUNBOOK.md)
+and a `TBD (run pending)` placeholder in the result tables, which
+`scripts/update_readme.py` fills once the run exists. Other possible
+extensions: a learning-rate search as in the paper, a key/value cache for
+faster decoding with a latency benchmark, and a comparison with
+instruction-tuned LLMs on the same benchmarks (Yin et al., 2024).
+
 ## Motivation
 
-Multi-intent spoken language understanding is usually solved with a classifier
-for intents and a tagger for slots. GEMIS casts both as generation with a
-pointer network, which removes the fixed number of intents. A deployed
-understanding model also has to notice utterances it was not trained for, and
-OOD detection is mostly studied for discriminative intent classifiers. This
-repository asks two questions: can the GEMIS results be reproduced from the
-paper alone, and which OOD score works for such a generative model when the
-false-alarm rate has to be controlled?
+Multi-intent understanding is usually split into an intent classifier and a
+slot tagger. GEMIS generates both as one sequence with a pointer network,
+which removes any fixed number of intents. A deployed model must also notice
+requests it was not trained for, with a controlled false-alarm rate. Two
+questions: can GEMIS be reproduced from the paper alone, and which OOD score
+works for such a generative model?
 
 ## Method
 
@@ -66,7 +101,7 @@ For `please play got the time and add my hands to travelling playlist`:
 generated as tokens: the model points at the first subword of the word, or at
 the final `</s>` for an end after the last word.
 
-**Pointer head** (paper Eq. 5-6, `src/gemis/models/pointer.py`):
+**Pointer head** (paper Eq. 5-6, [`src/gemis/models/pointer.py`](src/gemis/models/pointer.py)):
 
 ```
 H~  = α · MLP(H_e) + (1 − α) · E_x
@@ -74,9 +109,9 @@ H~  = α · MLP(H_e) + (1 − α) · E_x
 ```
 
 `E_x` are the input token embeddings and `W` the embeddings of the label
-tokens, which are initialised with the mean embedding of the label's subwords.
+tokens, initialised with the mean embedding of each label's subwords.
 
-**Attention-over-attention** (paper Eq. 8-10, `src/gemis/models/aoa.py`),
+**Attention-over-attention** (paper Eq. 8-10, [`src/gemis/models/aoa.py`](src/gemis/models/aoa.py)),
 which replaces the cross-attention of every decoder layer:
 
 ```
@@ -85,33 +120,34 @@ SAM = softmax(Q K_dec^T / √d_k + causal mask)      self-attention map,  T × T
 A   = softmax(Q K_enc^T / √d_k + SAM · CAM / √d_k)
 ```
 
-AoA adds no parameters; the projections are the pretrained BART ones.
+AoA adds no parameters; it reuses the pretrained BART projections. Since
+`SAM · CAM` is a convex combination of probability vectors, the added term is
+bounded by `1/√d_k` (0.125 for BART), so its effect on the attention logits is
+small by construction.
 
 ### Differences from the paper
 
-The paper leaves several points open. Each choice below is a deviation or an
-assumption, not a claim about what the authors did.
+The paper leaves several points open. Each choice below is an assumption of
+this repository, not a claim about what the authors did.
 
 | Point | Paper | This repository |
 |---|---|---|
 | Position convention | Example `2 5 track` for "Got The Time"; inclusive/exclusive and word/subword level not stated | Word index, 0-based, exclusive end, pointer on the first subword |
-| `α` in the pointer | Hyperparameter, value not reported | Learned scalar, `sigmoid`, initialised at 0.5; it stayed between 0.502 and 0.503 in every run (`pointer_alpha` in `seed*_train.json`), so in practice α = 0.5 |
+| `α` in the pointer | Hyperparameter, value not reported | Learned scalar (`sigmoid`, initialised at 0.5); it stayed between 0.502 and 0.503 in every run (`pointer_alpha` in `seed*_train.json`), so in practice α = 0.5 |
 | First term of the AoA logits | Written without `1/√d_k` | Scaled, as the pretrained attention weights require |
 | Pointer MLP size, warmup, weight decay, gradient clipping | Not reported | 512, 1% linear warmup, 0.01, 1.0 |
 | Learning rate | Chosen in {1e-5, 2e-5, 3e-5} on dev | 2e-5, no search |
 | Epochs | 30 | At most 30, early stopping after 5 epochs without dev improvement |
 | Label inventory | Not stated | Training split only (labels unseen in training cannot be predicted) |
+| Backbone | BART-large (main), BART-base (Table 5) | BART-base so far; BART-large configs are ready |
 | Number of runs | Not reported | 3 seeds, mean ± standard deviation |
-| MultiATIS / MultiSNIPS | Constructed with BERT NSP, threshold not reported, data not released | Not reproduced (see [Limitations](#limitations-and-threats-to-validity)) |
-
-Since `SAM · CAM` is a convex combination of probability vectors, the AoA term
-is bounded by `1/√d_k` (0.125 for BART). Its effect on the attention logits is
-small by construction; the ablation below measures what it changes.
+| MultiATIS / MultiSNIPS | Built with BERT next-sentence prediction, threshold not reported, data not released | Algorithm implemented ([`src/gemis/data/construct.py`](src/gemis/data/construct.py)), no result reported |
 
 ### OOD scores and conformal calibration
 
-All scores come from one greedy decoding pass (`src/gemis/ood/scores.py`) and
-are oriented so that higher means more likely OOD.
+All model-based scores come from one greedy decoding pass
+([`src/gemis/ood/scores.py`](src/gemis/ood/scores.py)) and are oriented so that
+higher means more likely OOD.
 
 | Score | Definition | Origin |
 |---|---|---|
@@ -119,17 +155,18 @@ are oriented so that higher means more likely OOD.
 | `first_step_msp` | 1 − maximum probability at the first step | Hendrycks & Gimpel (2017) |
 | `sequence_nll` | Length-normalised negative log-likelihood of the greedy output | Ren et al. (2023) |
 | `intent_energy` | −logsumexp of the intent logits at the first step | Liu et al. (2020) |
-| `mahalanobis` | Mahalanobis distance of the mean encoder state to the training features (one Gaussian) | Lee et al. (2018), class-agnostic variant |
+| `mahalanobis` | Mahalanobis distance of the mean encoder state to the training features (one Gaussian) | Lee et al. (2018), class-agnostic variant (Podolskiy et al., 2021) |
 | `knn` | Distance to the 10th nearest training feature after L2 normalisation | Sun et al. (2022) |
-| `negative_length` | Minus the number of words; uses no model (trivial baseline) | this repository |
+| `negative_length` | Minus the number of words; uses no model | trivial baseline |
 
-A score is turned into a decision with split-conformal calibration
-(`src/gemis/ood/calibrator.py`): given `n` in-distribution calibration scores,
-an utterance is flagged when its score exceeds the
-`⌈(n+1)(1−α)⌉`-th smallest of them. If calibration and test utterances are
-exchangeable, the probability of flagging an in-distribution utterance is at
-most `α` (Vovk et al., 2005; Bates et al., 2023). The guarantee is marginal
-over the calibration draw and says nothing about the detection rate.
+A score becomes a decision through split-conformal calibration
+([`src/gemis/ood/calibrator.py`](src/gemis/ood/calibrator.py)): given `n`
+in-distribution calibration scores, an utterance is flagged when its score
+exceeds the `⌈(n+1)(1−α)⌉`-th smallest of them. If calibration and test
+utterances are exchangeable, the probability of flagging an in-distribution
+utterance is at most `α` (Vovk et al., 2005; Bates et al., 2023). The
+guarantee is marginal over the calibration draw and says nothing about the
+detection rate.
 
 ## Experimental protocol
 
@@ -145,38 +182,50 @@ over the calibration draw and says nothing about the detection rate.
 never occurs in the training split (`atis_day_name`, `flight`,
 `stoploc.airport_code`, `booking_class`). A model whose labels come from the
 training data cannot get them fully right, which caps overall accuracy at
-86.4% on this test set.
+86.4% on this test set. MixSNIPS has no such case.
 
-**Metrics** (`src/gemis/training/metrics.py`), as in AGIF and GL-GIN:
-slot F1 is the micro-averaged F1 over exact `(start, end, type)` spans, equal
-to conlleval chunk F1 (tested against `seqeval`); intent accuracy is the share
-of utterances whose predicted intent set equals the gold set; overall accuracy
-requires both the intent set and all slots to be correct.
+**Metrics** ([`src/gemis/training/metrics.py`](src/gemis/training/metrics.py)),
+as in AGIF and GL-GIN. *Slot F1*: micro-averaged F1 over exact
+`(start, end, type)` spans, equal to the conlleval chunk F1 (tested against
+`seqeval`). *Intent accuracy*: share of utterances whose predicted intent set
+equals the gold set. *Overall accuracy*: share of utterances with both the
+intent set and every slot correct. Each test result also has a 95% bootstrap
+interval over utterances.
 
-**Baselines.** Published AGIF and GL-GIN numbers as reference points; a BART
-model without AoA, without the pointer network (positions generated as
-classes) and with randomly initialised label embeddings as ablations.
+**Baselines.** Published AGIF and GL-GIN numbers as reference points
+([`results/reference/published.json`](results/reference/published.json));
+ablations without AoA, without the pointer network (positions generated as
+classes) and with randomly initialised label embeddings, compared to the full
+model with an exact McNemar test per seed.
 
 **OOD evaluation sets.** In-distribution: the test split. Far-OOD: the 1,000
 out-of-scope test queries of CLINC150 (Larson et al., 2019), lowercased and
-stripped of sentence punctuation to match the in-distribution formatting.
-Near-OOD: a model is retrained without any utterance containing
-`AddToPlaylist` or `SearchScreeningEvent`; test utterances carrying one of
-them are the OOD set. Metrics: AUROC, AUPR with OOD as positive (AUPR-out) and
-with in-distribution as positive (AUPR-in), FPR at 95% TPR, each with a 95%
+stripped of sentence punctuation to match the in-distribution formatting
+([`data/ood/`](data/ood)). Near-OOD: a model retrained without any utterance
+containing `AddToPlaylist` or `SearchScreeningEvent`, whose test utterances
+form the OOD set. Metrics: AUROC, AUPR with OOD as positive (AUPR-out) and with
+in-distribution as positive (AUPR-in), FPR at 95% TPR, each with a 95%
 bootstrap interval, and the false-alarm rate at the conformal threshold for
 `α ∈ {0.01, 0.05, 0.1}`.
 
-**Conformal validity.** Two calibration schemes are compared. *Dev-calibrated*:
-threshold from the dev split, false-alarm rate measured on the test split; the
-dev split also selects the checkpoint, so exchangeability is not guaranteed.
+**Conformal validity.** Two calibration schemes. *Calibrated on dev*:
+threshold from the dev split, false-alarm rate measured on test; the dev
+split also selects the checkpoint, so exchangeability is not guaranteed.
 *Random splits of test*: 1,000 random halves of the test split as calibration
-and evaluation sets, exchangeable by construction.
+and evaluation sets, exchangeable by construction; this checks the
+implementation.
 
 **Hyperparameters.** [`configs/_base.yaml`](configs/_base.yaml) and one file
-per experiment in [`configs/`](configs). Seeds: 13, 42, 87.
+per experiment in [`configs/`](configs); nothing is set in the code. Seeds 13,
+42 and 87.
 
 ## Results
+
+The tables between the markers are copied from
+[`results/nlu/summary.md`](results/nlu/summary.md) and
+[`results/ood/summary.md`](results/ood/summary.md) by
+`scripts/update_readme.py`; figures are drawn by `scripts/make_figures.py`
+from the same files.
 
 <!-- RESULTS:BEGIN -->
 ### Part 1: reproduction of the NLU results
@@ -266,15 +315,14 @@ Source: [`results/ood/summary.md`](results/ood/summary.md), built from `results/
 
 ### Analysis
 
-The tables above are generated; this section is written by hand from them and
-from the per-seed files they cite.
+Written by hand from the tables above and the per-seed files they cite.
 
-**NLU, MixATIS, bart-base (3 seeds).** Intent accuracy (80.92 ± 0.87) is
-within one standard deviation of the paper's bart-base number (81.3). Slot F1
+**NLU, MixATIS, BART-base (3 seeds).** Intent accuracy (80.92 ± 0.87) is
+within one standard deviation of the paper's BART-base number (81.3). Slot F1
 (87.44 ± 1.13) and overall accuracy (50.89 ± 0.46) are 1.1 and 1.6 points
 below it. The paper reports neither its number of runs nor a variance, so
 these gaps cannot be tested; they are compatible with the differences listed
-in "Differences from the paper" (no learning-rate search in particular).
+above, the missing learning-rate search in particular.
 
 **Dev is much easier than test.** The dev overall accuracy at the selected
 epoch is 88.80 ± 1.30, the test overall accuracy 50.89 ± 0.46. Two causes are
@@ -284,100 +332,97 @@ visible in the files:
   training split; 108 of them have the intent `atis_day_name`
   (`most_missed_intents` in `seed*_test.json`). Restricted to the 715 other
   utterances, intent accuracy rises to 93.01 ± 1.01, close to its dev value.
-  A typical failure: *"what day of the week do flights from nashville to tacoma
-  fly on and also flight number from houston to dallas"* is predicted as
+  A typical failure: *"what day of the week do flights from nashville to
+  tacoma fly on and also flight number from houston to dallas"* is parsed as
   `atis_flight` + `atis_flight_no`, and `day` is tagged
   `depart_time.period_of_day` (`seed13_test_predictions.jsonl`).
 * Overall accuracy on those 715 utterances is still 58.93 ± 0.53. The
-  remaining errors are mostly slots: in every seed 60-64% of the wrongly
+  remaining errors are mostly slots: in every seed, 60-64% of the wrongly
   parsed test utterances have the right intents and wrong slots
   (`intent_correct` / `overall_correct` in `seed*_test_predictions.jsonl`).
   `city_name` has the most errors in every seed (130-154 missed spans,
   `error_analysis` in `seed*_test.json`), mostly confusions with
-  `fromloc.city_name` / `toloc.city_name`; for example, in *"list california airports , list la and ..."* the model
-  tags `la` as `fromloc.city_name` instead of `city_name`.
+  `fromloc.city_name` / `toloc.city_name`; in *"list california airports ,
+  list la and ..."* the model tags `la` as `fromloc.city_name` instead of
+  `city_name`.
 
-Dev accuracy is a weak guide to test accuracy here: seed 87 reached the
-highest dev score (90.25, epoch 13), seed 42 stopped improving on dev at
-epoch 3 (88.41), yet seed 42 has the higher test overall accuracy (51.21 vs.
-51.09; `seed*_train.json`, `seed*_test.json`).
+Dev accuracy is also a weak guide for model selection here: seed 87 reached
+the highest dev score (90.25, epoch 13) and seed 42 stopped improving on dev
+at epoch 3 (88.41), yet seed 42 has the higher test overall accuracy (51.21
+vs. 51.09; `seed*_train.json`, `seed*_test.json`).
 
 **Far-OOD (CLINC150 out-of-scope).** The two encoder-feature scores separate
 CLINC from MixATIS almost perfectly (Mahalanobis AUROC 0.9985, k-NN 0.9915);
-the four decoder scores reach 0.928 to 0.955. The length-only baseline
-already reaches 0.894: CLINC queries are short single requests, MixATIS
-utterances are concatenations of two or three requests. Part of what every
-score detects is therefore utterance length, and this experiment says little
-about OOD utterances that look like in-distribution ones. The held-out-intent
-experiment (near-OOD) is the one that addresses this; it is not run yet.
+the four decoder scores reach 0.928 to 0.955. The length-only baseline already
+reaches 0.894: CLINC queries are short single requests, MixATIS utterances
+concatenate two or three requests. Part of what every score detects is
+therefore utterance length, and this experiment says little about OOD
+requests that look like in-distribution ones; that is the purpose of the
+near-OOD experiment, which is not run yet.
 
-**Conformal validity.** With the threshold computed on random halves of the
-test split, the false-alarm rate at alpha = 0.05 is between 0.0476 and 0.0484
-for every model-based score, matching the theoretical value (the length
-baseline is lower, 0.0398, because its many tied values make the threshold
-conservative): the procedure is
-implemented correctly. With the threshold computed on the dev split, the
-false-alarm rate on test is 0.118 to 0.246 for the model-based scores: dev and
-test are not exchangeable, and the guarantee does not hold in this
-deployment-like setting. The split by label status shows where the excess
-comes from for the decoder scores: `intent_entropy` flags 97% of the 113 test
-utterances with a label unseen in training and 8.6% of the others. These
-"false alarms" are mostly utterances that ask for an intent the model was
-never trained on, which an OOD detector arguably should flag; the 8.6% on the
-other utterances is still above alpha. The encoder-feature scores behave the
-other way round: they almost never flag the unseen-label utterances (k-NN
-0.6%) and flag 13-14% of the others, i.e. they measure input novelty, not
-label novelty. The length baseline, which does not depend on the model, has a
-dev-calibrated false-alarm rate of 0.068.
+**Conformal validity.** With thresholds computed on random halves of the test
+split, the false-alarm rate at α = 0.05 is between 0.0476 and 0.0484 for every
+model-based score, matching the theoretical value (the length baseline is
+lower, 0.0398, because its many tied values make the threshold conservative).
+The procedure is therefore implemented correctly. With thresholds computed on
+the dev split, the false-alarm rate on test is 0.118 to 0.246: dev and test
+are not exchangeable, and the guarantee does not hold in this deployment-like
+setting. The split by label status shows where the excess comes from:
+`intent_entropy` flags 97% of the 113 test utterances with a label unseen in
+training and 8.6% of the others. These "false alarms" are mostly requests for
+an intent the model was never trained on, which an OOD detector arguably
+should flag; the 8.6% on the remaining utterances is still above α. The
+encoder-feature scores behave the other way round: they almost never flag the
+unseen-label utterances (k-NN 0.6%) and flag 13-14% of the others, i.e. they
+measure how unusual the input is, not whether its intent is known. The length
+baseline, which does not depend on the model, has a dev-calibrated false-alarm
+rate of 0.068.
 
 ## Limitations and threats to validity
 
-* **This is not a faithful reproduction of the paper's numbers.** No code or
+* **Not a faithful reproduction of the paper's numbers.** No code or
   hyperparameter file was released; the choices in "Differences from the
-  paper" may differ from the authors'. A gap to the published numbers can come
+  paper" may differ from the authors'. Gaps to the published numbers can come
   from those choices, from the missing learning-rate search, or from the
   backbone size.
+* **Partial coverage.** Only `mixatis_bart-base` has results: no MixSNIPS run,
+  no ablation, no near-OOD run, no BART-large run (see
+  [Project status](#project-status)). Rows marked `TBD (run pending)` have not
+  been run; nothing in this README is an expected or estimated value.
 * **MultiATIS and MultiSNIPS are not reproduced.** The paper's best-known
   numbers (e.g. 98.8 intent accuracy on MultiSNIPS) are on datasets the
-  authors constructed and did not release. `scripts/construct_dataset.py`
-  implements the published algorithm, but the threshold is unreported, so the
-  output is a different dataset and no result on it is claimed.
-* **Rows marked "TBD (run pending)" have not been run.** Nothing in this
-  README is an expected or estimated value. At this point only
-  `mixatis_bart-base` has results: no MixSNIPS run, no ablation, no near-OOD
-  run, no bart-large run.
+  authors built and did not release. `scripts/construct_dataset.py`
+  implements their algorithm, but its threshold is unreported, so its output
+  is a different dataset and no result on it is claimed.
+* **Three seeds** give a rough standard deviation, not a tight interval.
 * **Resumed runs.** Every committed run was interrupted (out of memory or
-  machine sleep) and resumed from its last epoch, so none is bit-identical to
-  an uninterrupted run with the same seed. The first six epochs of seed 13
-  ran on a slightly earlier version of the code; see
+  machine sleep) and resumed from its last completed epoch, so none is
+  bit-identical to an uninterrupted run with the same seed. The first six
+  epochs of seed 13 ran on a slightly earlier version of the code; see
   [`docs/devlog.md`](docs/devlog.md).
-* **Seeds.** Three seeds give a rough standard deviation, not a tight
-  interval. Rows with fewer seeds say so.
 * **Far-OOD is an easy setting.** CLINC150 out-of-scope queries are about
-  topics unrelated to flight booking or the SNIPS domains, and they are much
-  shorter than the multi-intent utterances (length alone gives AUROC 0.894).
-  High AUROC there does not transfer to utterances that are close to the
-  training intents; the held-out-intent experiment is the relevant one for
-  that.
+  topics unrelated to flight booking and are much shorter than the
+  multi-intent utterances. High AUROC there does not transfer to requests
+  close to the training intents.
 * **The MixATIS test split is not purely in-distribution.** 108 of its 828
   utterances ask for `atis_day_name`, an intent absent from training. They
   are counted as in-distribution in every OOD table, as the dataset defines
   them, which lowers the AUROC of scores that react to unknown intents.
-* **The near-OOD set mixes known and unknown intents.** A held-out utterance
-  in MixSNIPS usually also contains one or two in-distribution intents, so the
-  task is to notice that *part* of the utterance is unsupported.
+* **The near-OOD set will mix known and unknown intents.** A held-out
+  utterance in MixSNIPS usually also contains one or two in-distribution
+  intents, so the task is to notice that *part* of the request is unsupported.
 * **Conformal calibration controls false alarms only**, on average over
   calibration sets, and only if deployment data is exchangeable with the
-  calibration data. It gives no guarantee on the share of OOD utterances
-  detected, and none under distribution shift of the in-distribution data.
+  calibration data. It gives no guarantee on the share of OOD requests
+  detected, and none under distribution shift.
 * **No latency study.** Decoding re-runs the decoder on the full prefix at
   each step (no key/value cache); `utterances_per_second` in the result files
   is indicative only.
 
 ## Reproduce
 
-[`RUNBOOK.md`](RUNBOOK.md) lists the exact command, output files, hardware and
-time for every table. In short:
+[`RUNBOOK.md`](RUNBOOK.md) gives the exact command, outputs, hardware and time
+of every run. In short:
 
 ```bash
 pip install -e ".[dev]"
@@ -387,6 +432,10 @@ sh scripts/run_experiment.sh configs/mixatis_bart-base.yaml 13 42 87  # train, e
 python scripts/aggregate_results.py && python scripts/make_figures.py
 python scripts/update_readme.py                                       # copy the tables into this README
 ```
+
+One MixATIS BART-base seed takes 1.2 to 3 hours on an Apple M4 (16 GB, MPS),
+depending on when early stopping triggers (`seconds` per epoch in
+`seed*_train.json`).
 
 Using a trained checkpoint:
 
@@ -409,14 +458,21 @@ Output with the seed 13 checkpoint (word indices are 0-based, end exclusive):
 Frame(intents=frozenset({'atis_flight', 'atis_airfare'}), slots=frozenset({(4, 5, 'fromloc.city_name'), (12, 13, 'fare_basis_code'), (6, 7, 'toloc.city_name')}))
 ```
 
+Checkpoints (560 MB each) are not in the repository.
+
 ## Repository structure
 
 ```
 configs/            one YAML per experiment, all inheriting from _base.yaml
 data/ood/           CLINC150 out-of-scope test queries (far-OOD set)
-docs/devlog.md      defects found in v0.1 and claims that were withdrawn
-results/            committed outputs: per-seed JSON/CSV, summaries, figures, published reference numbers
-scripts/            train, evaluate, score_ood, evaluate_ood, aggregate_results, make_figures, update_readme, data preparation
+docs/devlog.md      defects found in v0.1, claims that were withdrawn, notes on the committed runs
+results/
+  nlu/              per-seed training logs, test metrics, predictions, summary tables
+  ood/              per-seed scores of every utterance, OOD metrics, calibrators, summary tables
+  figures/          training curves, ROC curves, score histograms, conformal validity
+  reference/        published numbers (paper and baselines), kept apart from ours
+scripts/            train, evaluate, score_ood, evaluate_ood, aggregate_results, make_figures,
+                    update_readme, data download and preparation
 src/gemis/
   data/             AGIF parsing, word-to-subword alignment, targets, decoding to frames, Algorithm 1
   models/           AoA cross-attention, decoder layer, pointer head, GEMISModel
@@ -425,12 +481,13 @@ src/gemis/
 tests/              offline tests on a toy dataset with a tiny random BART
 ```
 
-The tests include: the word-to-subword alignment on BART's tokenizer, an
-oracle check that the training targets decode back to the gold frames,
-equivalence of the modified decoder layer with stock BART when the AoA term is
-switched off, invariance of the outputs to batch padding, an end-to-end
-overfit and checkpoint reload, span F1 against `seqeval`, and false-alarm
-control of the conformal threshold on exchangeable scores.
+The 53 tests run on CPU without any download in about 10 seconds. They cover
+the word-to-subword alignment on BART's tokenizer, an oracle check that the
+training targets decode back to the gold frames, equivalence of the modified
+decoder layer with stock BART when the AoA term is off, invariance of the
+outputs to batch padding, an end-to-end overfit and checkpoint reload,
+span F1 against `seqeval`, and false-alarm control of the conformal threshold
+on exchangeable scores. CI runs lint and tests on Python 3.10 and 3.12.
 
 ## References
 
@@ -440,14 +497,15 @@ control of the conformal threshold on exchangeable scores.
 4. L. Qin et al. *AGIF: An Adaptive Graph-Interactive Framework for Joint Multiple Intent Detection and Slot Filling.* Findings of EMNLP 2020. [arXiv:2004.10087](https://arxiv.org/abs/2004.10087), [code and MixATIS / MixSNIPS](https://github.com/LooperXX/AGIF)
 5. L. Qin et al. *GL-GIN: Fast and Accurate Non-Autoregressive Model for Joint Multiple Intent Detection and Slot Filling.* ACL 2021. [arXiv:2106.01925](https://arxiv.org/abs/2106.01925)
 6. C.-W. Goo et al. *Slot-Gated Modeling for Joint Slot Filling and Intent Prediction.* NAACL 2018. [code and data](https://github.com/MiuLab/SlotGated-SLU)
-7. S. Larson et al. *An Evaluation Dataset for Intent Classification and Out-of-Scope Prediction.* EMNLP 2019. [arXiv:1909.02027](https://arxiv.org/abs/1909.02027), [data](https://github.com/clinc/oos-eval)
-8. D. Hendrycks, K. Gimpel. *A Baseline for Detecting Misclassified and Out-of-Distribution Examples in Neural Networks.* ICLR 2017. [arXiv:1610.02136](https://arxiv.org/abs/1610.02136)
-9. W. Liu et al. *Energy-based Out-of-distribution Detection.* NeurIPS 2020. [arXiv:2010.03759](https://arxiv.org/abs/2010.03759)
-10. K. Lee et al. *A Simple Unified Framework for Detecting Out-of-Distribution Samples and Adversarial Attacks.* NeurIPS 2018. [arXiv:1807.03888](https://arxiv.org/abs/1807.03888)
-11. A. Podolskiy et al. *Revisiting Mahalanobis Distance for Transformer-Based Out-of-Domain Detection.* AAAI 2021. [arXiv:2101.03778](https://arxiv.org/abs/2101.03778)
-12. Y. Sun et al. *Out-of-Distribution Detection with Deep Nearest Neighbors.* ICML 2022. [arXiv:2204.06507](https://arxiv.org/abs/2204.06507)
-13. J. Ren et al. *Out-of-Distribution Detection and Selective Generation for Conditional Language Models.* ICLR 2023. [arXiv:2209.15558](https://arxiv.org/abs/2209.15558)
-14. V. Vovk, A. Gammerman, G. Shafer. *Algorithmic Learning in a Random World.* Springer, 2005.
-15. A. N. Angelopoulos, S. Bates. *A Gentle Introduction to Conformal Prediction and Distribution-Free Uncertainty Quantification.* 2021. [arXiv:2107.07511](https://arxiv.org/abs/2107.07511)
-16. S. Bates et al. *Testing for Outliers with Conformal p-values.* Annals of Statistics 51(1), 2023. [arXiv:2104.08279](https://arxiv.org/abs/2104.08279)
-17. F. den Hengst et al. *Conformal Intent Classification and Clarification for Fast and Accurate Intent Recognition.* Findings of NAACL 2024. [arXiv:2403.18973](https://arxiv.org/abs/2403.18973)
+7. S. Yin et al. *Do Large Language Model Understand Multi-Intent Spoken Language?* 2024. [arXiv:2403.04481](https://arxiv.org/abs/2403.04481)
+8. S. Larson et al. *An Evaluation Dataset for Intent Classification and Out-of-Scope Prediction.* EMNLP 2019. [arXiv:1909.02027](https://arxiv.org/abs/1909.02027), [data](https://github.com/clinc/oos-eval)
+9. D. Hendrycks, K. Gimpel. *A Baseline for Detecting Misclassified and Out-of-Distribution Examples in Neural Networks.* ICLR 2017. [arXiv:1610.02136](https://arxiv.org/abs/1610.02136)
+10. W. Liu et al. *Energy-based Out-of-distribution Detection.* NeurIPS 2020. [arXiv:2010.03759](https://arxiv.org/abs/2010.03759)
+11. K. Lee et al. *A Simple Unified Framework for Detecting Out-of-Distribution Samples and Adversarial Attacks.* NeurIPS 2018. [arXiv:1807.03888](https://arxiv.org/abs/1807.03888)
+12. A. Podolskiy et al. *Revisiting Mahalanobis Distance for Transformer-Based Out-of-Domain Detection.* AAAI 2021. [arXiv:2101.03778](https://arxiv.org/abs/2101.03778)
+13. Y. Sun et al. *Out-of-Distribution Detection with Deep Nearest Neighbors.* ICML 2022. [arXiv:2204.06507](https://arxiv.org/abs/2204.06507)
+14. J. Ren et al. *Out-of-Distribution Detection and Selective Generation for Conditional Language Models.* ICLR 2023. [arXiv:2209.15558](https://arxiv.org/abs/2209.15558)
+15. V. Vovk, A. Gammerman, G. Shafer. *Algorithmic Learning in a Random World.* Springer, 2005.
+16. A. N. Angelopoulos, S. Bates. *A Gentle Introduction to Conformal Prediction and Distribution-Free Uncertainty Quantification.* 2021. [arXiv:2107.07511](https://arxiv.org/abs/2107.07511)
+17. S. Bates et al. *Testing for Outliers with Conformal p-values.* Annals of Statistics 51(1), 2023. [arXiv:2104.08279](https://arxiv.org/abs/2104.08279)
+18. F. den Hengst et al. *Conformal Intent Classification and Clarification for Fast and Accurate Intent Recognition.* Findings of NAACL 2024. [arXiv:2403.18973](https://arxiv.org/abs/2403.18973)
