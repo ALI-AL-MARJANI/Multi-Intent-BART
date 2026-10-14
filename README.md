@@ -14,7 +14,25 @@ gets to the published numbers. Part 2 is not in the paper.
 ## TL;DR
 
 <!-- TLDR:BEGIN -->
-TBD (run pending)
+Test-set results of this repository (*ours*, mean ± standard deviation over seeds) next to the numbers published by Li & Zhu (2026) (*paper*, number of runs not reported).
+
+| Experiment | Seeds | Slot F1 (ours) | Paper | Intent acc. (ours) | Paper | Overall acc. (ours) | Paper |
+|---|---|---|---|---|---|---|---|
+| `mixatis_bart-base` | 3 | 87.44 ± 1.13 | 88.5 | 80.92 ± 0.87 | 81.3 | 50.89 ± 0.46 | 52.5 |
+
+OOD detection, `mixatis_bart-base`, `far_clinc` (n=1000) against the in-distribution test split (n=828), 3 seed(s). False-alarm rate of the conformal threshold at alpha = 0.05 (target: at most 0.05).
+
+| Score | AUROC ↑ | FPR@95TPR ↓ | False alarms, threshold from random halves of test | False alarms, threshold from dev |
+|---|---|---|---|---|
+| `intent_entropy` | 0.9280 ± 0.0021 | 0.2476 ± 0.0158 | 0.0480 ± 0.0003 | 0.2069 ± 0.0137 |
+| `first_step_msp` | 0.9375 ± 0.0083 | 0.1296 ± 0.0109 | 0.0482 ± 0.0003 | 0.1184 ± 0.0105 |
+| `sequence_nll` | 0.9548 ± 0.0031 | 0.2991 ± 0.0116 | 0.0484 ± 0.0002 | 0.2460 ± 0.0512 |
+| `intent_energy` | 0.9284 ± 0.0171 | 0.1948 ± 0.0039 | 0.0482 ± 0.0001 | 0.1643 ± 0.0212 |
+| `mahalanobis` | 0.9985 ± 0.0001 | 0.0068 ± 0.0007 | 0.0477 ± 0.0001 | 0.1284 ± 0.0092 |
+| `knn` | 0.9915 ± 0.0006 | 0.0217 ± 0.0012 | 0.0477 ± 0.0001 | 0.1176 ± 0.0025 |
+| `negative_length` | 0.8944 ± 0.0000 | 0.2536 ± 0.0000 | 0.0398 ± 0.0000 | 0.0676 ± 0.0000 |
+
+Setup: macOS-15.6.1-arm64-arm-64bit, 16.0 GB, device `mps`, torch 2.8.0, transformers 4.57.1; official MixATIS split (test n=828); seeds 13, 42, 87; greedy decoding. Sources: [`results/nlu/summary.json`](results/nlu/summary.json), [`results/ood/summary.json`](results/ood/summary.json). Runs that are configured but not done are listed as `TBD (run pending)` in [Results](#results).
 <!-- TLDR:END -->
 
 ## Motivation
@@ -77,7 +95,7 @@ assumption, not a claim about what the authors did.
 | Point | Paper | This repository |
 |---|---|---|
 | Position convention | Example `2 5 track` for "Got The Time"; inclusive/exclusive and word/subword level not stated | Word index, 0-based, exclusive end, pointer on the first subword |
-| `α` in the pointer | Hyperparameter, value not reported | Learned scalar, `sigmoid`, initialised at 0.5 |
+| `α` in the pointer | Hyperparameter, value not reported | Learned scalar, `sigmoid`, initialised at 0.5; it stayed between 0.502 and 0.503 in every run (`pointer_alpha` in `seed*_train.json`), so in practice α = 0.5 |
 | First term of the AoA logits | Written without `1/√d_k` | Scaled, as the pretrained attention weights require |
 | Pointer MLP size, warmup, weight decay, gradient clipping | Not reported | 512, 1% linear warmup, 0.01, 1.0 |
 | Learning rate | Chosen in {1e-5, 2e-5, 3e-5} on dev | 2e-5, no search |
@@ -103,6 +121,7 @@ are oriented so that higher means more likely OOD.
 | `intent_energy` | −logsumexp of the intent logits at the first step | Liu et al. (2020) |
 | `mahalanobis` | Mahalanobis distance of the mean encoder state to the training features (one Gaussian) | Lee et al. (2018), class-agnostic variant |
 | `knn` | Distance to the 10th nearest training feature after L2 normalisation | Sun et al. (2022) |
+| `negative_length` | Minus the number of words; uses no model (trivial baseline) | this repository |
 
 A score is turned into a decision with split-conformal calibration
 (`src/gemis/ood/calibrator.py`): given `n` in-distribution calibration scores,
@@ -160,8 +179,156 @@ per experiment in [`configs/`](configs). Seeds: 13, 42, 87.
 ## Results
 
 <!-- RESULTS:BEGIN -->
-TBD (run pending)
+### Part 1: reproduction of the NLU results
+
+Source: [`results/nlu/summary.md`](results/nlu/summary.md), built by `scripts/aggregate_results.py` from the per-seed files in `results/nlu/<experiment>/`.
+
+Test-set results. *Ours*: mean ± sample standard deviation over seeds. *Paper*: Li & Zhu (2026), Tables 3 and 5, number of runs not reported.
+
+| Experiment | Seeds | Slot F1 (ours) | Paper | Intent acc. (ours) | Paper | Overall acc. (ours) | Paper |
+|---|---|---|---|---|---|---|---|
+| mixatis_bart-base | 3 | 87.44 ± 1.13 | 88.5 | 80.92 ± 0.87 | 81.3 | 50.89 ± 0.46 | 52.5 |
+| mixatis_bart-base_no-aoa | 0 | TBD (run pending) | n/a | TBD (run pending) | n/a | TBD (run pending) | n/a |
+| mixatis_bart-base_no-pointer | 0 | TBD (run pending) | n/a | TBD (run pending) | n/a | TBD (run pending) | n/a |
+| mixatis_bart-base_random-label-init | 0 | TBD (run pending) | n/a | TBD (run pending) | n/a | TBD (run pending) | n/a |
+| mixatis_bart-large | 0 | TBD (run pending) | 89.2 | TBD (run pending) | 81.4 | TBD (run pending) | 53.4 |
+| mixsnips_bart-base | 0 | TBD (run pending) | 96.6 | TBD (run pending) | 96.5 | TBD (run pending) | 84.3 |
+| mixsnips_bart-base_holdout | 0 | TBD (run pending) | n/a | TBD (run pending) | n/a | TBD (run pending) | n/a |
+| mixsnips_bart-large | 0 | TBD (run pending) | 97.4 | TBD (run pending) | 98.1 | TBD (run pending) | 87.4 |
+
+Dev vs. test, and the test utterances whose intents and slot types all occur in the training split (the others cannot be fully correct with a training-split label inventory):
+
+| Experiment | Dev overall acc. (selected epoch) | Test overall acc. | Test utterances with an unseen label | Slot F1, seen labels only | Intent acc., seen labels only | Overall acc., seen labels only |
+|---|---|---|---|---|---|---|
+| mixatis_bart-base | 88.80 ± 1.30 | 50.89 ± 0.46 | 113 of 828 | 87.52 ± 0.57 | 93.01 ± 1.01 | 58.93 ± 0.53 |
+
+![training curves](results/figures/training_mixatis_bart-base.png)
+
+### Part 2: OOD detection and conformal calibration
+
+Source: [`results/ood/summary.md`](results/ood/summary.md), built from `results/ood/<experiment>/seed*/metrics.json`; per-utterance scores are in the `scores.csv` files next to them.
+
+**mixatis_bart-base**: `far_clinc` (n=1000) vs. `id_test` (n=828), 3 seed(s). OOD is the positive class.
+
+| Score | AUROC ↑ | AUPR-out ↑ | AUPR-in ↑ | FPR@95TPR ↓ |
+|---|---|---|---|---|
+| intent_entropy | 0.9280 ± 0.0021 | 0.9386 ± 0.0028 | 0.9275 ± 0.0011 | 0.2476 ± 0.0158 |
+| first_step_msp | 0.9375 ± 0.0083 | 0.9248 ± 0.0172 | 0.9502 ± 0.0041 | 0.1296 ± 0.0109 |
+| sequence_nll | 0.9548 ± 0.0031 | 0.9665 ± 0.0023 | 0.9427 ± 0.0022 | 0.2991 ± 0.0116 |
+| intent_energy | 0.9284 ± 0.0171 | 0.9113 ± 0.0439 | 0.9411 ± 0.0069 | 0.1948 ± 0.0039 |
+| mahalanobis | 0.9985 ± 0.0001 | 0.9986 ± 0.0001 | 0.9986 ± 0.0001 | 0.0068 ± 0.0007 |
+| knn | 0.9915 ± 0.0006 | 0.9872 ± 0.0011 | 0.9933 ± 0.0005 | 0.0217 ± 0.0012 |
+| negative_length | 0.8944 ± 0.0000 | 0.8490 ± 0.0000 | 0.9112 ± 0.0000 | 0.2536 ± 0.0000 |
+
+**mixatis_bart-base**: conformal false-alarm rate on `id_test` (target: alpha).
+
+| Score | alpha | Calibrated on dev | Random splits of test (mean of 1000) |
+|---|---|---|---|
+| intent_entropy | 0.01 | 0.1345 ± 0.0302 | 0.0098 ± 0.0002 |
+| intent_entropy | 0.05 | 0.2069 ± 0.0137 | 0.0480 ± 0.0003 |
+| intent_entropy | 0.1 | 0.2613 ± 0.0140 | 0.0985 ± 0.0002 |
+| first_step_msp | 0.01 | 0.0568 ± 0.0360 | 0.0097 ± 0.0002 |
+| first_step_msp | 0.05 | 0.1184 ± 0.0105 | 0.0482 ± 0.0003 |
+| first_step_msp | 0.1 | 0.1687 ± 0.0210 | 0.0989 ± 0.0002 |
+| sequence_nll | 0.01 | 0.0616 ± 0.0210 | 0.0097 ± 0.0002 |
+| sequence_nll | 0.05 | 0.2460 ± 0.0512 | 0.0484 ± 0.0002 |
+| sequence_nll | 0.1 | 0.3724 ± 0.0562 | 0.0989 ± 0.0010 |
+| intent_energy | 0.01 | 0.1123 ± 0.0147 | 0.0097 ± 0.0001 |
+| intent_energy | 0.05 | 0.1643 ± 0.0212 | 0.0482 ± 0.0001 |
+| intent_energy | 0.1 | 0.2045 ± 0.0025 | 0.0982 ± 0.0003 |
+| mahalanobis | 0.01 | 0.0254 ± 0.0012 | 0.0091 ± 0.0000 |
+| mahalanobis | 0.05 | 0.1284 ± 0.0092 | 0.0477 ± 0.0001 |
+| mahalanobis | 0.1 | 0.2275 ± 0.0042 | 0.0982 ± 0.0003 |
+| knn | 0.01 | 0.0185 ± 0.0014 | 0.0091 ± 0.0000 |
+| knn | 0.05 | 0.1176 ± 0.0025 | 0.0477 ± 0.0001 |
+| knn | 0.1 | 0.1763 ± 0.0024 | 0.0981 ± 0.0002 |
+| negative_length | 0.01 | 0.0048 ± 0.0000 | 0.0051 ± 0.0000 |
+| negative_length | 0.05 | 0.0676 ± 0.0000 | 0.0398 ± 0.0000 |
+| negative_length | 0.1 | 0.1244 ± 0.0000 | 0.0849 ± 0.0000 |
+
+**mixatis_bart-base**: dev-calibrated false-alarm rate at alpha = 0.05, by whether the `id_test` utterance carries an intent or slot type that never occurs in the training split.
+
+| Score | With an unseen label (n=113) | Seen labels only (n=715) |
+|---|---|---|
+| intent_entropy | 0.9705 ± 0.0204 | 0.0862 ± 0.0154 |
+| first_step_msp | 0.4454 ± 0.0223 | 0.0667 ± 0.0093 |
+| sequence_nll | 0.8378 ± 0.0803 | 0.1524 ± 0.0472 |
+| intent_energy | 0.4307 ± 0.0184 | 0.1221 ± 0.0231 |
+| mahalanobis | 0.0767 ± 0.0184 | 0.1366 ± 0.0082 |
+| knn | 0.0059 ± 0.0102 | 0.1352 ± 0.0029 |
+
+![ood roc](results/figures/ood_roc_mixatis_bart-base_seed13.png)
+
+![ood scores](results/figures/ood_scores_mixatis_bart-base_seed13.png)
+
+![conformal validity](results/figures/conformal_validity_mixatis_bart-base_seed13.png)
 <!-- RESULTS:END -->
+
+### Analysis
+
+The tables above are generated; this section is written by hand from them and
+from the per-seed files they cite.
+
+**NLU, MixATIS, bart-base (3 seeds).** Intent accuracy (80.92 ± 0.87) is
+within one standard deviation of the paper's bart-base number (81.3). Slot F1
+(87.44 ± 1.13) and overall accuracy (50.89 ± 0.46) are 1.1 and 1.6 points
+below it. The paper reports neither its number of runs nor a variance, so
+these gaps cannot be tested; they are compatible with the differences listed
+in "Differences from the paper" (no learning-rate search in particular).
+
+**Dev is much easier than test.** The dev overall accuracy at the selected
+epoch is 88.80 ± 1.30, the test overall accuracy 50.89 ± 0.46. Two causes are
+visible in the files:
+
+* 113 of the 828 test utterances carry a label that never occurs in the
+  training split; 108 of them have the intent `atis_day_name`
+  (`most_missed_intents` in `seed*_test.json`). Restricted to the 715 other
+  utterances, intent accuracy rises to 93.01 ± 1.01, close to its dev value.
+  A typical failure: *"what day of the week do flights from nashville to tacoma
+  fly on and also flight number from houston to dallas"* is predicted as
+  `atis_flight` + `atis_flight_no`, and `day` is tagged
+  `depart_time.period_of_day` (`seed13_test_predictions.jsonl`).
+* Overall accuracy on those 715 utterances is still 58.93 ± 0.53. The
+  remaining errors are mostly slots: in every seed 60-64% of the wrongly
+  parsed test utterances have the right intents and wrong slots
+  (`intent_correct` / `overall_correct` in `seed*_test_predictions.jsonl`).
+  `city_name` has the most errors in every seed (130-154 missed spans,
+  `error_analysis` in `seed*_test.json`), mostly confusions with
+  `fromloc.city_name` / `toloc.city_name`; for example, in *"list california airports , list la and ..."* the model
+  tags `la` as `fromloc.city_name` instead of `city_name`.
+
+Dev accuracy is a weak guide to test accuracy here: seed 87 reached the
+highest dev score (90.25, epoch 13), seed 42 stopped improving on dev at
+epoch 3 (88.41), yet seed 42 has the higher test overall accuracy (51.21 vs.
+51.09; `seed*_train.json`, `seed*_test.json`).
+
+**Far-OOD (CLINC150 out-of-scope).** The two encoder-feature scores separate
+CLINC from MixATIS almost perfectly (Mahalanobis AUROC 0.9985, k-NN 0.9915);
+the four decoder scores reach 0.928 to 0.955. The length-only baseline
+already reaches 0.894: CLINC queries are short single requests, MixATIS
+utterances are concatenations of two or three requests. Part of what every
+score detects is therefore utterance length, and this experiment says little
+about OOD utterances that look like in-distribution ones. The held-out-intent
+experiment (near-OOD) is the one that addresses this; it is not run yet.
+
+**Conformal validity.** With the threshold computed on random halves of the
+test split, the false-alarm rate at alpha = 0.05 is between 0.0476 and 0.0484
+for every model-based score, matching the theoretical value (the length
+baseline is lower, 0.0398, because its many tied values make the threshold
+conservative): the procedure is
+implemented correctly. With the threshold computed on the dev split, the
+false-alarm rate on test is 0.118 to 0.246 for the model-based scores: dev and
+test are not exchangeable, and the guarantee does not hold in this
+deployment-like setting. The split by label status shows where the excess
+comes from for the decoder scores: `intent_entropy` flags 97% of the 113 test
+utterances with a label unseen in training and 8.6% of the others. These
+"false alarms" are mostly utterances that ask for an intent the model was
+never trained on, which an OOD detector arguably should flag; the 8.6% on the
+other utterances is still above alpha. The encoder-feature scores behave the
+other way round: they almost never flag the unseen-label utterances (k-NN
+0.6%) and flag 13-14% of the others, i.e. they measure input novelty, not
+label novelty. The length baseline, which does not depend on the model, has a
+dev-calibrated false-alarm rate of 0.068.
 
 ## Limitations and threats to validity
 
@@ -176,13 +343,26 @@ TBD (run pending)
   implements the published algorithm, but the threshold is unreported, so the
   output is a different dataset and no result on it is claimed.
 * **Rows marked "TBD (run pending)" have not been run.** Nothing in this
-  README is an expected or estimated value.
+  README is an expected or estimated value. At this point only
+  `mixatis_bart-base` has results: no MixSNIPS run, no ablation, no near-OOD
+  run, no bart-large run.
+* **Resumed runs.** Every committed run was interrupted (out of memory or
+  machine sleep) and resumed from its last epoch, so none is bit-identical to
+  an uninterrupted run with the same seed. The first six epochs of seed 13
+  ran on a slightly earlier version of the code; see
+  [`docs/devlog.md`](docs/devlog.md).
 * **Seeds.** Three seeds give a rough standard deviation, not a tight
   interval. Rows with fewer seeds say so.
 * **Far-OOD is an easy setting.** CLINC150 out-of-scope queries are about
-  topics unrelated to flight booking or the SNIPS domains. High AUROC there
-  does not transfer to utterances that are close to the training intents; the
-  held-out-intent experiment is the relevant one for that.
+  topics unrelated to flight booking or the SNIPS domains, and they are much
+  shorter than the multi-intent utterances (length alone gives AUROC 0.894).
+  High AUROC there does not transfer to utterances that are close to the
+  training intents; the held-out-intent experiment is the relevant one for
+  that.
+* **The MixATIS test split is not purely in-distribution.** 108 of its 828
+  utterances ask for `atis_day_name`, an intent absent from training. They
+  are counted as in-distribution in every OOD table, as the dataset defines
+  them, which lowers the AUROC of scores that react to unknown intents.
 * **The near-OOD set mixes known and unknown intents.** A held-out utterance
   in MixSNIPS usually also contains one or two in-distribution intents, so the
   task is to notice that *part* of the utterance is unsupported.
@@ -205,6 +385,7 @@ python scripts/download_data.py --dataset mixatis mixsnips
 pytest                                                                # CPU, offline, about 10 s
 sh scripts/run_experiment.sh configs/mixatis_bart-base.yaml 13 42 87  # train, evaluate, OOD-score
 python scripts/aggregate_results.py && python scripts/make_figures.py
+python scripts/update_readme.py                                       # copy the tables into this README
 ```
 
 Using a trained checkpoint:
@@ -222,6 +403,12 @@ output = model.eval().generate(ids, torch.ones_like(ids))
 print(decode_frame(output.sequences[0], model.label_space, source.word_starts))
 ```
 
+Output with the seed 13 checkpoint (word indices are 0-based, end exclusive):
+
+```
+Frame(intents=frozenset({'atis_flight', 'atis_airfare'}), slots=frozenset({(4, 5, 'fromloc.city_name'), (12, 13, 'fare_basis_code'), (6, 7, 'toloc.city_name')}))
+```
+
 ## Repository structure
 
 ```
@@ -229,7 +416,7 @@ configs/            one YAML per experiment, all inheriting from _base.yaml
 data/ood/           CLINC150 out-of-scope test queries (far-OOD set)
 docs/devlog.md      defects found in v0.1 and claims that were withdrawn
 results/            committed outputs: per-seed JSON/CSV, summaries, figures, published reference numbers
-scripts/            train, evaluate, score_ood, evaluate_ood, aggregate_results, make_figures, data preparation
+scripts/            train, evaluate, score_ood, evaluate_ood, aggregate_results, make_figures, update_readme, data preparation
 src/gemis/
   data/             AGIF parsing, word-to-subword alignment, targets, decoding to frames, Algorithm 1
   models/           AoA cross-attention, decoder layer, pointer head, GEMISModel

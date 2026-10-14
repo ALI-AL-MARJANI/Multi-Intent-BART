@@ -1,0 +1,81 @@
+{
+  "experiment": "mixatis_bart-base",
+  "seed": 13,
+  "checkpoint": "checkpoints/mixatis_bart-base/seed13/best.pt",
+  "set_sizes": {
+    "id_dev": 759,
+    "id_test": 828,
+    "far_clinc": 1000
+  },
+  "holdout_intents": [],
+  "feature_bank_size": 10000,
+  "seconds": 214.9,
+  "config": {
+    "model": {
+      "backbone": "facebook/bart-base",
+      "mlp_hidden": 512,
+      "use_aoa": true,
+      "use_pointer": true,
+      "label_init": "subword_mean"
+    },
+    "data": {
+      "max_source_length": 128,
+      "max_position_classes": 128,
+      "pad_to_multiple_of": 8,
+      "holdout_intents": [],
+      "train_path": "data/raw/mixatis/train.txt",
+      "dev_path": "data/raw/mixatis/dev.txt",
+      "test_path": "data/raw/mixatis/test.txt"
+    },
+    "training": {
+      "learning_rate": 2e-05,
+      "weight_decay": 0.01,
+      "batch_size": 16,
+      "gradient_accumulation_steps": 1,
+      "max_epochs": 30,
+      "early_stopping_patience": 5,
+      "warmup_ratio": 0.01,
+      "gradient_clip": 1.0,
+      "mixed_precision": false,
+      "eval_batch_size": 64,
+      "max_new_tokens": 96,
+      "device": "auto"
+    },
+    "seeds": [
+      13,
+      42,
+      87
+    ],
+    "ood": {
+      "far_ood_path": "data/ood/clinc150_oos_test.txt",
+      "feature_bank_size": 10000,
+      "knn_k": 10
+    },
+    "output": {
+      "checkpoint_dir": "checkpoints",
+      "results_dir": "results/nlu"
+    },
+    "experiment_name": "mixatis_bart-base",
+    "dataset": "mixatis"
+  },
+  "env": {
+    "date_utc": "2026-10-14T03:49:11+00:00",
+    "code_sha256": "faad7d02f5e917f732d65a19058ce54248519649a61f3cfae005c1043de66375",
+    "git_sha": null,
+    "python": "3.12.12",
+    "platform": "macOS-15.6.1-arm64-arm-64bit",
+    "processor": "arm",
+    "cpu_count": 10,
+    "memory_gb": 16.0,
+    "gpu": null,
+    "device": "mps",
+    "versions": {
+      "torch": "2.8.0",
+      "transformers": "4.57.1",
+      "tokenizers": "0.22.2",
+      "numpy": "2.5.4",
+      "scipy": "1.18.1",
+      "scikit-learn": "1.9.1"
+    }
+  }
+}

@@ -1,0 +1,185 @@
+{
+  "experiments": [
+    {
+      "experiment": "mixatis_bart-base",
+      "dataset": "mixatis",
+      "seeds": [
+        13,
+        42,
+        87
+      ],
+      "n_test": 828,
+      "ours": {
+        "slot_f1": {
+          "n": 3,
+          "mean": 87.43939063197547,
+          "std": 1.1312997169787133,
+          "values": [
+            87.01653861179841,
+            86.58042597674115,
+            88.72120730738682
+          ]
+        },
+        "intent_accuracy": {
+          "n": 3,
+          "mean": 80.91787439613528,
+          "std": 0.8709061051845448,
+          "values": [
+            81.8840579710145,
+            80.67632850241546,
+            80.19323671497584
+          ]
+        },
+        "overall_accuracy": {
+          "n": 3,
+          "mean": 50.88566827697263,
+          "std": 0.45723899724639894,
+          "values": [
+            50.36231884057971,
+            51.207729468599034,
+            51.08695652173913
+          ]
+        }
+      },
+      "paper": {
+        "slot_f1": 88.5,
+        "intent_accuracy": 81.3,
+        "overall_accuracy": 52.5
+      },
+      "source_files": [
+        "results/nlu/mixatis_bart-base/seed13_test.json",
+        "results/nlu/mixatis_bart-base/seed42_test.json",
+        "results/nlu/mixatis_bart-base/seed87_test.json"
+      ],
+      "delta": {
+        "slot_f1": -1.0606093680245294,
+        "intent_accuracy": -0.38212560386472205,
+        "overall_accuracy": -1.6143317230273695
+      },
+      "dev_overall_accuracy_at_selected_epoch": {
+        "n": 3,
+        "mean": 88.80105401844533,
+        "std": 1.297609723556794,
+        "values": [
+          87.74703557312253,
+          88.40579710144928,
+          90.25032938076416
+        ]
+      },
+      "selected_epochs": [
+        6,
+        3,
+        13
+      ],
+      "n_test_with_unseen_label": 113,
+      "seen_labels_only": {
+        "slot_f1": {
+          "n": 3,
+          "mean": 87.51682445701113,
+          "std": 0.5696881294442783,
+          "values": [
+            87.5252446791984,
+            86.94297288875039,
+            88.08225580308459
+          ]
+        },
+        "intent_accuracy": {
+          "n": 3,
+          "mean": 93.00699300699301,
+          "std": 1.0085458113185917,
+          "values": [
+            94.12587412587412,
+            92.72727272727273,
+            92.16783216783217
+          ]
+        },
+        "overall_accuracy": {
+          "n": 3,
+          "mean": 58.92773892773892,
+          "std": 0.5295019436643618,
+          "values": [
+            58.32167832167832,
+            59.3006993006993,
+            59.16083916083916
+          ]
+        }
+      }
+    },
+    {
+      "experiment": "mixatis_bart-base_no-aoa",
+      "dataset": "mixatis",
+      "seeds": [],
+      "n_test": null,
+      "ours": null,
+      "paper": null,
+      "source_files": []
+    },
+    {
+      "experiment": "mixatis_bart-base_no-pointer",
+      "dataset": "mixatis",
+      "seeds": [],
+      "n_test": null,
+      "ours": null,
+      "paper": null,
+      "source_files": []
+    },
+    {
+      "experiment": "mixatis_bart-base_random-label-init",
+      "dataset": "mixatis",
+      "seeds": [],
+      "n_test": null,
+      "ours": null,
+      "paper": null,
+      "source_files": []
+    },
+    {
+      "experiment": "mixatis_bart-large",
+      "dataset": "mixatis",
+      "seeds": [],
+      "n_test": null,
+      "ours": null,
+      "paper": {
+        "slot_f1": 89.2,
+        "intent_accuracy": 81.4,
+        "overall_accuracy": 53.4
+      },
+      "source_files": []
+    },
+    {
+      "experiment": "mixsnips_bart-base",
+      "dataset": "mixsnips",
+      "seeds": [],
+      "n_test": null,
+      "ours": null,
+      "paper": {
+        "slot_f1": 96.6,
+        "intent_accuracy": 96.5,
+        "overall_accuracy": 84.3
+      },
+      "source_files": []
+    },
+    {
+      "experiment": "mixsnips_bart-base_holdout",
+      "dataset": "mixsnips",
+      "seeds": [],
+      "n_test": null,
+      "ours": null,
+      "paper": null,
+      "source_files": []
+    },
+    {
+      "experiment": "mixsnips_bart-large",
+      "dataset": "mixsnips",
+      "seeds": [],
+      "n_test": null,
+      "ours": null,
+      "paper": {
+        "slot_f1": 97.4,
+        "intent_accuracy": 98.1,
+        "overall_accuracy": 87.4
+      },
+      "source_files": []
+    }
+  ],
+  "mcnemar_overall_accuracy": []
+}

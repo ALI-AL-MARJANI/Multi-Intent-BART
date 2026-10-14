@@ -57,10 +57,14 @@ After any run:
 ```bash
 python scripts/aggregate_results.py   # results/nlu/summary.{json,md}, results/ood/summary.{json,md}
 python scripts/make_figures.py        # results/figures/*.png
-git add results && git commit -m "exp: <what was run>"
+python scripts/update_readme.py       # copies the tables into the TL;DR and Results sections of the README
+git add results README.md && git commit -m "exp: <what was run>"
 ```
 
-The README tables are copies of `results/nlu/summary.md` and `results/ood/summary.md`.
+The README tables are copies of `results/nlu/summary.md` and
+`results/ood/summary.md`, written between the `TLDR` and `RESULTS` markers by
+`scripts/update_readme.py`. The analysis paragraphs under them are written by
+hand and must be re-read after new runs.
 
 ## 2. Runs, hardware and time
 

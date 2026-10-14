@@ -1,0 +1,219 @@
+{
+  "experiment": "mixatis_bart-base",
+  "seed": 13,
+  "split": "test",
+  "n_utterances": 828,
+  "metrics": {
+    "slot_f1": 87.01653861179841,
+    "intent_accuracy": 81.8840579710145,
+    "overall_accuracy": 50.36231884057971
+  },
+  "bootstrap_ci95": {
+    "slot_f1": [
+      85.75019477256973,
+      88.202992524519
+    ],
+    "intent_accuracy": [
+      79.22705314009661,
+      84.42028985507247
+    ],
+    "overall_accuracy": [
+      47.10144927536232,
+      53.8677536231884
+    ]
+  },
+  "error_analysis": {
+    "intent_count_confusion": {
+      "gold=1,pred=1": 143,
+      "gold=2,pred=1": 8,
+      "gold=2,pred=2": 477,
+      "gold=3,pred=2": 2,
+      "gold=3,pred=3": 198
+    },
+    "most_missed_intents": {
+      "atis_day_name": 108,
+      "atis_city": 28,
+      "atis_abbreviation": 12,
+      "atis_flight": 3,
+      "atis_aircraft": 1,
+      "atis_ground_fare": 1
+    },
+    "most_spurious_intents": {
+      "atis_flight": 73,
+      "atis_flight_time": 29,
+      "atis_abbreviation": 23,
+      "atis_aircraft": 11,
+      "atis_quantity": 2,
+      "atis_restriction": 2,
+      "atis_airfare": 1,
+      "atis_meal": 1,
+      "atis_airport": 1
+    },
+    "slot_boundary_errors": 52,
+    "slot_types_with_most_errors": {
+      "city_name": {
+        "tp": 191,
+        "fp": 27,
+        "fn": 130,
+        "f1": 70.87
+      },
+      "depart_time.period_of_day": {
+        "tp": 46,
+        "fp": 88,
+        "fn": 28,
+        "f1": 44.23
+      },
+      "airport_name": {
+        "tp": 37,
+        "fp": 19,
+        "fn": 83,
+        "f1": 42.05
+      },
+      "toloc.city_name": {
+        "tp": 711,
+        "fp": 71,
+        "fn": 13,
+        "f1": 94.42
+      },
+      "fromloc.airport_name": {
+        "tp": 44,
+        "fp": 83,
+        "fn": 0,
+        "f1": 51.46
+      },
+      "flight_number": {
+        "tp": 66,
+        "fp": 46,
+        "fn": 22,
+        "f1": 66.0
+      },
+      "state_name": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 60,
+        "f1": 0.0
+      },
+      "airline_code": {
+        "tp": 92,
+        "fp": 60,
+        "fn": 0,
+        "f1": 75.41
+      },
+      "fromloc.city_name": {
+        "tp": 708,
+        "fp": 47,
+        "fn": 5,
+        "f1": 96.46
+      },
+      "flight_time": {
+        "tp": 90,
+        "fp": 27,
+        "fn": 0,
+        "f1": 86.96
+      },
+      "depart_time.time": {
+        "tp": 27,
+        "fp": 25,
+        "fn": 0,
+        "f1": 68.35
+      },
+      "meal": {
+        "tp": 107,
+        "fp": 22,
+        "fn": 0,
+        "f1": 90.68
+      },
+      "meal_description": {
+        "tp": 2,
+        "fp": 0,
+        "fn": 19,
+        "f1": 17.39
+      },
+      "fromloc.state_name": {
+        "tp": 5,
+        "fp": 14,
+        "fn": 0,
+        "f1": 41.67
+      },
+      "period_of_day": {
+        "tp": 0,
+        "fp": 0,
+        "fn": 13,
+        "f1": 0.0
+      }
+    }
+  },
+  "checkpoint": "checkpoints/mixatis_bart-base/seed13/best.pt",
+  "checkpoint_epoch": 6,
+  "decode_seconds": 60.3,
+  "utterances_per_second": 13.7,
+  "predictions_file": "seed13_test_predictions.jsonl",
+  "config": {
+    "model": {
+      "backbone": "facebook/bart-base",
+      "mlp_hidden": 512,
+      "use_aoa": true,
+      "use_pointer": true,
+      "label_init": "subword_mean"
+    },
+    "data": {
+      "max_source_length": 128,
+      "max_position_classes": 128,
+      "pad_to_multiple_of": 8,
+      "holdout_intents": [],
+      "train_path": "data/raw/mixatis/train.txt",
+      "dev_path": "data/raw/mixatis/dev.txt",
+      "test_path": "data/raw/mixatis/test.txt"
+    },
+    "training": {
+      "learning_rate": 2e-05,
+      "weight_decay": 0.01,
+      "batch_size": 16,
+      "gradient_accumulation_steps": 1,
+      "max_epochs": 30,
+      "early_stopping_patience": 5,
+      "warmup_ratio": 0.01,
+      "gradient_clip": 1.0,
+      "mixed_precision": false,
+      "eval_batch_size": 64,
+      "max_new_tokens": 96,
+      "device": "auto"
+    },
+    "seeds": [
+      13,
+      42,
+      87
+    ],
+    "ood": {
+      "far_ood_path": "data/ood/clinc150_oos_test.txt",
+      "feature_bank_size": 10000,
+      "knn_k": 10
+    },
+    "output": {
+      "checkpoint_dir": "checkpoints",
+      "results_dir": "results/nlu"
+    },
+    "experiment_name": "mixatis_bart-base",
+    "dataset": "mixatis"
+  },
+  "env": {
+    "date_utc": "2026-10-12T00:20:22+00:00",
+    "code_sha256": "faad7d02f5e917f732d65a19058ce54248519649a61f3cfae005c1043de66375",
+    "git_sha": null,
+    "python": "3.12.12",
+    "platform": "macOS-15.6.1-arm64-arm-64bit",
+    "processor": "arm",
+    "cpu_count": 10,
+    "memory_gb": 16.0,
+    "gpu": null,
+    "device": "mps",
+    "versions": {
+      "torch": "2.8.0",
+      "transformers": "4.57.1",
+      "tokenizers": "0.22.2",
+      "numpy": "2.5.4",
+      "scipy": "1.18.1",
+      "scikit-learn": "1.9.1"
+    }
+  }
+}

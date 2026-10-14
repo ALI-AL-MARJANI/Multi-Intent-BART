@@ -8,7 +8,7 @@ help:
 	@echo "format    ruff format"
 	@echo "test      offline CPU test suite"
 	@echo "data      download MixATIS, MixSNIPS and the CLINC150 out-of-scope set"
-	@echo "tables    rebuild results/*/summary.{json,md} from the per-seed files"
+	@echo "tables    rebuild results/*/summary.{json,md} from the per-seed files and copy them into the README"
 	@echo "figures   rebuild results/figures from results/"
 	@echo "Training and evaluation commands are in RUNBOOK.md."
 
@@ -31,6 +31,7 @@ data:
 
 tables:
 	$(PYTHON) scripts/aggregate_results.py
+	$(PYTHON) scripts/update_readme.py
 
 figures:
 	$(PYTHON) scripts/make_figures.py
