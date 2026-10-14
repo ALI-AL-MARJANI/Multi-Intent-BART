@@ -1,64 +1,46 @@
 #!/usr/bin/env python3
-"""Run Algorithm 1 (NSP-based multi-intent construction) to create MultiATIS/MultiSNIPS.
+"""Build a multi-intent split from a single-intent one (Algorithm 1 of the paper).
 
-Usage:
-    python scripts/construct_dataset.py \\
-        --input  data/raw/atis/train.txt \\
-        --output data/processed/multiatis/ \\
-        --tau    0.5 \\
-        --bert   bert-base-uncased \\
-        --device cpu
+    python scripts/download_data.py --dataset snips
+    python scripts/construct_dataset.py --input data/raw/snips/train.txt \\
+        --output data/processed/multisnips/train.txt --tau 0.5
+
+The result is not the paper's MultiATIS / MultiSNIPS (see ``gemis/data/construct.py``).
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+from collections import Counter
 from pathlib import Path
 
-from gemis.data.construct import MultiIntentConstructor
+from gemis.data.construct import MultiIntentConstructor, bert_nsp_scorer
 from gemis.utils.io import load_raw_dataset, write_dataset
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s — %(message)s",
-)
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("construct_dataset")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Construct multi-intent dataset via BERT NSP")
-    parser.add_argument("--input",  required=True, type=Path, help="Input single-intent .txt file")
-    parser.add_argument("--output", required=True, type=Path, help="Output directory")
-    parser.add_argument("--split",  default="train", choices=["train", "dev", "test"])
-    parser.add_argument("--tau",    type=float, default=0.5, help="NSP coherence threshold")
-    parser.add_argument("--bert",   default="bert-base-uncased", help="BERT model for NSP")
-    parser.add_argument("--device", default="cpu", help="torch device (cpu / cuda)")
-    parser.add_argument("--seed",   type=int, default=42)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--input", required=True, type=Path)
+    parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--tau", type=float, default=0.5, help="NSP threshold (not reported in the paper)")
+    parser.add_argument("--bert", default="bert-base-uncased")
+    parser.add_argument("--device", default="cpu")
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
-    logger.info("Loading base dataset from %s", args.input)
     dataset = load_raw_dataset(args.input)
-    logger.info("Loaded %d samples", len(dataset))
+    constructor = MultiIntentConstructor(bert_nsp_scorer(args.bert, args.device), tau=args.tau, seed=args.seed)
+    multi = constructor.construct(dataset)
+    write_dataset(multi, args.output)
 
-    constructor = MultiIntentConstructor(
-        tau=args.tau,
-        bert_model=args.bert,
-        device=args.device,
-        seed=args.seed,
-    )
-
-    multi_dataset = constructor.construct(dataset)
-
-    out_path = args.output / f"{args.split}.txt"
-    write_dataset(multi_dataset, out_path)
-    logger.info("Written %d samples to %s", len(multi_dataset), out_path)
-
-    # quick stats
-    n_intents = [len(s.intents) for s in multi_dataset]
-    for k in [1, 2, 3]:
-        count = sum(n == k for n in n_intents)
-        logger.info("  %d intent(s): %d samples (%.1f%%)", k, count, 100 * count / len(multi_dataset))
+    counts = Counter(len(s.intents) for s in multi)
+    for k in sorted(counts):
+        logger.info("%d intent(s): %d utterances (%.1f%%)", k, counts[k], 100 * counts[k] / len(multi))
+    logger.info("wrote %d utterances to %s", len(multi), args.output)
 
 
 if __name__ == "__main__":

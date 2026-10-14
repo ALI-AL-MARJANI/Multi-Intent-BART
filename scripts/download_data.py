@@ -1,118 +1,66 @@
 #!/usr/bin/env python3
-"""Download ATIS, SNIPS, MixATIS, or MixSNIPS datasets.
+"""Download the datasets into ``data/raw/<name>/{train,dev,test}.txt`` (AGIF format).
 
-MixATIS / MixSNIPS come from the AGIF repository (LooperXX/AGIF).
-ATIS / SNIPS are pulled via the sz128 GitHub repo or HuggingFace.
+    python scripts/download_data.py --dataset mixatis mixsnips
 
-Usage:
-    python scripts/download_data.py --dataset mixatis --output data/raw/
-    python scripts/download_data.py --dataset mixsnips --output data/raw/
-    python scripts/download_data.py --dataset atis    --output data/raw/
-    python scripts/download_data.py --dataset snips   --output data/raw/
+* ``mixatis`` / ``mixsnips``: the cleaned multi-intent sets released with AGIF
+  (Qin et al., 2020), https://github.com/LooperXX/AGIF.
+* ``atis`` / ``snips``: the single-intent sets as distributed with Slot-Gated
+  SLU (Goo et al., 2018), https://github.com/MiuLab/SlotGated-SLU, converted
+  to AGIF format. They are only needed for ``scripts/construct_dataset.py``.
 """
 
 from __future__ import annotations
 
 import argparse
-import shutil
-import subprocess
-import sys
 import urllib.request
 from pathlib import Path
 
-AGIF_BASE = "https://raw.githubusercontent.com/LooperXX/AGIF/master/data"
-
-DATASET_URLS: dict[str, dict[str, str]] = {
-    "mixatis": {
-        "train.txt": f"{AGIF_BASE}/MixATIS_clean/train.txt",
-        "dev.txt":   f"{AGIF_BASE}/MixATIS_clean/dev.txt",
-        "test.txt":  f"{AGIF_BASE}/MixATIS_clean/test.txt",
-    },
-    "mixsnips": {
-        "train.txt": f"{AGIF_BASE}/MixSNIPS_clean/train.txt",
-        "dev.txt":   f"{AGIF_BASE}/MixSNIPS_clean/dev.txt",
-        "test.txt":  f"{AGIF_BASE}/MixSNIPS_clean/test.txt",
-    },
-}
+AGIF = "https://raw.githubusercontent.com/LooperXX/AGIF/master/data"
+SLOT_GATED = "https://raw.githubusercontent.com/MiuLab/SlotGated-SLU/master/data"
+AGIF_DIRS = {"mixatis": "MixATIS_clean", "mixsnips": "MixSNIPS_clean"}
+SPLITS = {"train": "train", "dev": "valid", "test": "test"}
 
 
-def download_file(url: str, dest: Path) -> None:
-    print(f"  Downloading {url}")
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    urllib.request.urlretrieve(url, dest)
+def fetch(url: str) -> str:
+    print(f"  {url}")
+    with urllib.request.urlopen(url, timeout=60) as response:
+        return response.read().decode("utf-8")
 
 
-def download_agif_dataset(name: str, output_dir: Path) -> None:
-    urls = DATASET_URLS[name]
-    target_dir = output_dir / name
-    for filename, url in urls.items():
-        download_file(url, target_dir / filename)
-    print(f"✓ {name} saved to {target_dir}")
+def download_agif(name: str, out_dir: Path) -> None:
+    for split in SPLITS:
+        (out_dir / f"{split}.txt").write_text(fetch(f"{AGIF}/{AGIF_DIRS[name]}/{split}.txt"), encoding="utf-8")
 
 
-def download_snips_hf(output_dir: Path) -> None:
-    """Download SNIPS via HuggingFace datasets and convert to AGIF format."""
-    try:
-        from datasets import load_dataset
-    except ImportError:
-        print("ERROR: `datasets` package not installed. Run: pip install datasets")
-        sys.exit(1)
-
-    print("Downloading SNIPS from HuggingFace (DeepPavlov/snips)...")
-    ds = load_dataset("DeepPavlov/snips")
-
-    target_dir = output_dir / "snips"
-    target_dir.mkdir(parents=True, exist_ok=True)
-
-    split_map = {"train": "train.txt", "validation": "dev.txt", "test": "test.txt"}
-    for hf_split, fname in split_map.items():
-        if hf_split not in ds:
-            continue
-        out_path = target_dir / fname
-        with open(out_path, "w", encoding="utf-8") as f:
-            for item in ds[hf_split]:
-                tokens = item["tokens"]
-                tags = item["ner_tags_str"] if "ner_tags_str" in item else item.get("slot_tags", ["O"] * len(tokens))
-                intent = item.get("intent", "unknown")
-                for token, tag in zip(tokens, tags):
-                    f.write(f"{token}\t{tag}\n")
-                f.write(f"{intent}\n\n")
-    print(f"✓ SNIPS saved to {target_dir}")
-
-
-def download_atis_github(output_dir: Path) -> None:
-    """Clone the sz128 repo and copy ATIS files."""
-    tmp = Path("/tmp/atis_tmp")
-    if not tmp.exists():
-        print("Cloning sz128/slot_filling_and_intent_detection_of_SLU...")
-        subprocess.run(
-            ["git", "clone", "--depth=1",
-             "https://github.com/sz128/slot_filling_and_intent_detection_of_SLU.git",
-             str(tmp)],
-            check=True,
-        )
-    atis_src = tmp / "data" / "atis"
-    target_dir = output_dir / "atis"
-    shutil.copytree(atis_src, target_dir, dirs_exist_ok=True)
-    print(f"✓ ATIS saved to {target_dir}")
+def download_single_intent(name: str, out_dir: Path) -> None:
+    for split, remote in SPLITS.items():
+        base = f"{SLOT_GATED}/{name}/{remote}"
+        words = fetch(f"{base}/seq.in").splitlines()
+        tags = fetch(f"{base}/seq.out").splitlines()
+        intents = fetch(f"{base}/label").splitlines()
+        if not len(words) == len(tags) == len(intents):
+            raise ValueError(f"{name}/{split}: files differ in length")
+        with open(out_dir / f"{split}.txt", "w", encoding="utf-8") as f:
+            for sentence, tag_line, intent in zip(words, tags, intents):
+                tokens, labels = sentence.split(), tag_line.split()
+                if len(tokens) != len(labels):
+                    raise ValueError(f"{name}/{split}: token/tag mismatch in {sentence!r}")
+                for token, label in zip(tokens, labels):
+                    f.write(f"{token} {label}\n")
+                f.write(intent.strip() + "\n\n")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Download SLU datasets")
-    parser.add_argument(
-        "--dataset",
-        choices=["mixatis", "mixsnips", "atis", "snips"],
-        required=True,
-    )
-    parser.add_argument("--output", default="data/raw/", type=Path)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--dataset", nargs="+", required=True, choices=["mixatis", "mixsnips", "atis", "snips"])
+    parser.add_argument("--output", default=Path("data/raw"), type=Path)
     args = parser.parse_args()
-
-    if args.dataset in ("mixatis", "mixsnips"):
-        download_agif_dataset(args.dataset, args.output)
-    elif args.dataset == "snips":
-        download_snips_hf(args.output)
-    elif args.dataset == "atis":
-        download_atis_github(args.output)
+    for name in args.dataset:
+        out_dir = args.output / name
+        out_dir.mkdir(parents=True, exist_ok=True)
+        (download_agif if name in AGIF_DIRS else download_single_intent)(name, out_dir)
+        print(f"{name} -> {out_dir}")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,40 @@
+# Defaults shared by every experiment. Experiment files set `base: _base.yaml`
+# and override what differs; scripts read the merged result.
+
+model:
+  backbone: facebook/bart-large
+  mlp_hidden: 512          # pointer MLP hidden size (not reported in the paper)
+  use_aoa: true            # attention-over-attention in the decoder cross-attention
+  use_pointer: true        # predict word positions by pointing at encoder states
+  label_init: subword_mean # subword_mean | random
+
+data:
+  max_source_length: 128     # subwords; the longest MixATIS / MixSNIPS utterance is 92
+  max_position_classes: 128  # only used when use_pointer is false
+  pad_to_multiple_of: 8      # batch widths are rounded up; padding is masked, results do not change
+  holdout_intents: []        # intents removed from train/dev/test (near-OOD protocol)
+
+training:
+  learning_rate: 0.00002   # paper searches {1e-5, 2e-5, 3e-5}; no search is done here
+  weight_decay: 0.01
+  batch_size: 16           # paper
+  gradient_accumulation_steps: 1
+  max_epochs: 30           # paper
+  early_stopping_patience: 5   # epochs without dev overall-accuracy gain (0 = off); not in the paper
+  warmup_ratio: 0.01       # not reported in the paper
+  gradient_clip: 1.0
+  mixed_precision: false   # fp16 autocast on CUDA
+  eval_batch_size: 64
+  max_new_tokens: 96       # the longest gold target sequence is 78 classes
+  device: auto             # cuda > mps > cpu
+
+seeds: [13, 42, 87]
+
+ood:
+  far_ood_path: data/ood/clinc150_oos_test.txt
+  feature_bank_size: 10000   # training utterances used by the Mahalanobis / k-NN scores
+  knn_k: 10
+
+output:
+  checkpoint_dir: checkpoints
+  results_dir: results/nlu

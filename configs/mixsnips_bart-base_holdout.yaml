@@ -1,0 +1,14 @@
+base: _base.yaml
+experiment_name: mixsnips_bart-base_holdout
+dataset: mixsnips
+
+data:
+  train_path: data/raw/mixsnips/train.txt
+  dev_path: data/raw/mixsnips/dev.txt
+  test_path: data/raw/mixsnips/test.txt
+  # Near-OOD protocol: these two intents never appear in training. Each has an
+  # in-distribution neighbour (PlayMusic, SearchCreativeWork).
+  holdout_intents: [AddToPlaylist, SearchScreeningEvent]
+
+model:
+  backbone: facebook/bart-base

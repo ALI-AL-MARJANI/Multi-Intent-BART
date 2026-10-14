@@ -1,7 +1,5 @@
-"""GEMIS: Generative Model for Joint Multiple Intent Detection and Slot Filling."""
+"""GEMIS: generative joint multiple intent detection and slot filling."""
 
 from __future__ import annotations
 
-from gemis.models.gemis import GEMISModel
-
-__all__ = ["GEMISModel"]
+__version__ = "0.2.0"

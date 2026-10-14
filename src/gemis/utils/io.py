@@ -1,7 +1,8 @@
-"""File I/O helpers and YAML config loading."""
+"""File I/O: YAML configs and the AGIF text format used by MixATIS / MixSNIPS."""
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -10,8 +11,21 @@ import yaml
 
 
 def load_config(path: str | Path) -> dict[str, Any]:
-    with open(path, "r") as f:
+    with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def write_json(obj: Any, path: str | Path) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, indent=2, sort_keys=False)
+        f.write("\n")
+
+
+def read_json(path: str | Path) -> Any:
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
 
 
 @dataclass
@@ -22,57 +36,56 @@ class RawToken:
 
 @dataclass
 class RawSampleIO:
-    """Parsed utterance from AGIF-format text files."""
+    """One utterance parsed from an AGIF-format file."""
+
     tokens: list[RawToken] = field(default_factory=list)
     intents: list[str] = field(default_factory=list)
 
+    @property
+    def words(self) -> list[str]:
+        return [t.word for t in self.tokens]
+
+    @property
+    def tags(self) -> list[str]:
+        return [t.bio_tag for t in self.tokens]
+
 
 def load_raw_dataset(path: str | Path) -> list[RawSampleIO]:
-    """Parse AGIF-format tab-separated files into RawSampleIO objects.
+    """Parse an AGIF-format file.
 
-    Format per utterance (blank-line separated):
-        word<TAB>BIO-tag
-        ...
-        intent1#intent2#...   (no BIO column)
+    Each utterance is a block of ``word BIO-tag`` lines followed by one
+    ``intent1#intent2`` line; blocks are separated by a blank line.
     """
     samples: list[RawSampleIO] = []
-    current_tokens: list[RawToken] = []
-    current_intents: list[str] = []
+    tokens: list[RawToken] = []
+    intents: list[str] = []
 
-    with open(path, "r", encoding="utf-8") as f:
+    def flush() -> None:
+        nonlocal tokens, intents
+        if tokens and intents:
+            samples.append(RawSampleIO(tokens=tokens, intents=intents))
+        tokens, intents = [], []
+
+    with open(path, encoding="utf-8") as f:
         for raw_line in f:
-            line = raw_line.rstrip("\n")
-
-            if line == "":
-                if current_tokens and current_intents:
-                    samples.append(
-                        RawSampleIO(tokens=current_tokens, intents=current_intents)
-                    )
-                current_tokens = []
-                current_intents = []
-                continue
-
-            # AGIF data is space-separated (not tab-separated)
-            parts = line.split()
-            if len(parts) == 1:
-                # intent line: "intent1#intent2#..."
-                current_intents = parts[0].split("#")
+            parts = raw_line.split()
+            if not parts:
+                flush()
+            elif len(parts) == 1:
+                intents = parts[0].split("#")
             elif len(parts) == 2:
-                current_tokens.append(RawToken(word=parts[0], bio_tag=parts[1]))
-
-    # flush last sample if file doesn't end with blank line
-    if current_tokens and current_intents:
-        samples.append(RawSampleIO(tokens=current_tokens, intents=current_intents))
-
+                tokens.append(RawToken(word=parts[0], bio_tag=parts[1]))
+            else:
+                raise ValueError(f"{path}: unexpected line {raw_line!r}")
+    flush()
     return samples
 
 
 def write_dataset(samples: list[RawSampleIO], path: str | Path) -> None:
-    """Write samples back to AGIF format."""
+    """Write samples in AGIF format."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         for sample in samples:
             for token in sample.tokens:
                 f.write(f"{token.word} {token.bio_tag}\n")
-            f.write("#".join(sample.intents) + "\n")
-            f.write("\n")
+            f.write("#".join(sample.intents) + "\n\n")

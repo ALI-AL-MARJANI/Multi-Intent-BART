@@ -1,120 +1,124 @@
-"""Evaluation metrics for GEMIS.
+"""Metrics of the multi-intent SLU literature (AGIF, GL-GIN, GEMIS).
 
-Three metrics reported in the paper:
-    1. Slot F1         — micro-averaged F1 over exact slot spans.
-    2. Intent Accuracy — exact-set match of intent labels per utterance.
-    3. Overall Accuracy — exact match of BOTH intents AND all slot spans.
+* **Slot F1**: micro-averaged F1 over exact ``(start, end, type)`` spans. On
+  well-formed BIO sequences this equals the conlleval / seqeval chunk F1 used
+  by the baselines (checked in ``tests/test_metrics.py``).
+* **Intent accuracy**: share of utterances whose predicted intent *set* equals
+  the gold set.
+* **Overall accuracy**: share of utterances with both the intent set and the
+  full slot set correct.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections import Counter
+from math import comb
+from typing import Any
 
-from transformers import PreTrainedTokenizerFast
+import numpy as np
 
-
-@dataclass
-class Frame:
-    """Parsed semantic frame from a decoded target sequence."""
-    intents: frozenset[str]
-    # (start_word_idx, end_word_idx_exclusive, slot_type)
-    slot_spans: list[tuple[int, int, str]]
+from gemis.data.dataset import Frame
 
 
-def _clean(s: str) -> str:
-    """Strip BPE Ġ/▁ prefixes and surrounding whitespace."""
-    return s.lstrip("Ġ▁").strip()
+def slot_counts(gold: Frame, pred: Frame) -> tuple[int, int, int]:
+    """(true positives, false positives, false negatives) for one utterance."""
+    tp = len(gold.slots & pred.slots)
+    return tp, len(pred.slots) - tp, len(gold.slots) - tp
 
 
-def parse_target_sequence(
-    token_ids: list[int],
-    tokenizer: PreTrainedTokenizerFast,
-) -> Frame:
-    """Decode a generated token id sequence into a Frame.
-
-    Target format: <intent:X> <intent:Y> ... start end <slot:Z> ...
-
-    Position tokens decode to plain integers (after stripping Ġ prefix).
-    Intent/slot tokens have the form <intent:X> or <slot:Z>.
-    """
-    intents: list[str] = []
-    slot_spans: list[tuple[int, int, str]] = []
-
-    # Decode each token to its text representation
-    decoded: list[str] = [
-        _clean(tokenizer.decode([tid], skip_special_tokens=False))
-        for tid in token_ids
-    ]
-
-    i = 0
-    # ── collect intents ───────────────────────────────────────────────────────
-    while i < len(decoded):
-        tok = decoded[i]
-        if tok.startswith("<intent:") and tok.endswith(">"):
-            intents.append(tok[len("<intent:"):-1])
-            i += 1
-        else:
-            break
-
-    # ── collect (start, end, slot_type) triples ───────────────────────────────
-    while i + 2 < len(decoded):
-        start_str = decoded[i]
-        end_str = decoded[i + 1]
-        slot_str = decoded[i + 2]
-
-        try:
-            start = int(start_str)
-            end = int(end_str)
-        except ValueError:
-            i += 1
-            continue
-
-        if slot_str.startswith("<slot:") and slot_str.endswith(">"):
-            slot_type = slot_str[len("<slot:"):-1]
-            slot_spans.append((start, end, slot_type))
-            i += 3
-        else:
-            i += 1
-
-    return Frame(intents=frozenset(intents), slot_spans=slot_spans)
-
-
-# ── metric functions ──────────────────────────────────────────────────────────
-
-def intent_accuracy(golds: list[Frame], preds: list[Frame]) -> float:
-    correct = sum(g.intents == p.intents for g, p in zip(golds, preds))
-    return correct / len(golds) if golds else 0.0
+def _f1(tp: int, fp: int, fn: int) -> float:
+    return 2 * tp / (2 * tp + fp + fn) if tp else 0.0
 
 
 def slot_f1(golds: list[Frame], preds: list[Frame]) -> float:
-    total_tp = total_fp = total_fn = 0
-
-    for gold, pred in zip(golds, preds):
-        gold_set = set(gold.slot_spans)
-        pred_set = set(pred.slot_spans)
-        tp = len(gold_set & pred_set)
-        fp = len(pred_set - gold_set)
-        fn = len(gold_set - pred_set)
-        total_tp += tp
-        total_fp += fp
-        total_fn += fn
-
-    p = total_tp / (total_tp + total_fp) if (total_tp + total_fp) > 0 else 0.0
-    r = total_tp / (total_tp + total_fn) if (total_tp + total_fn) > 0 else 0.0
-    return 2 * p * r / (p + r) if (p + r) > 0 else 0.0
+    counts = np.array([slot_counts(g, p) for g, p in zip(golds, preds)]).reshape(-1, 3)
+    return _f1(*counts.sum(axis=0).tolist())
 
 
-def overall_accuracy(golds: list[Frame], preds: list[Frame]) -> float:
-    correct = sum(
-        g.intents == p.intents and set(g.slot_spans) == set(p.slot_spans)
-        for g, p in zip(golds, preds)
-    )
-    return correct / len(golds) if golds else 0.0
+def intent_correct(gold: Frame, pred: Frame) -> bool:
+    return gold.intents == pred.intents
+
+
+def overall_correct(gold: Frame, pred: Frame) -> bool:
+    return gold.intents == pred.intents and gold.slots == pred.slots
 
 
 def compute_metrics(golds: list[Frame], preds: list[Frame]) -> dict[str, float]:
+    """Slot F1, intent accuracy and overall accuracy, in percent."""
+    if len(golds) != len(preds):
+        raise ValueError("gold and predicted frames differ in number")
+    n = max(len(golds), 1)
     return {
-        "slot_f1":          slot_f1(golds, preds) * 100,
-        "intent_accuracy":  intent_accuracy(golds, preds) * 100,
-        "overall_accuracy": overall_accuracy(golds, preds) * 100,
+        "slot_f1": 100 * slot_f1(golds, preds),
+        "intent_accuracy": 100 * sum(map(intent_correct, golds, preds)) / n,
+        "overall_accuracy": 100 * sum(map(overall_correct, golds, preds)) / n,
+    }
+
+
+def bootstrap_ci(
+    golds: list[Frame],
+    preds: list[Frame],
+    n_resamples: int = 1000,
+    seed: int = 0,
+    level: float = 0.95,
+) -> dict[str, list[float]]:
+    """Percentile bootstrap interval over utterances for the three metrics."""
+    rng = np.random.default_rng(seed)
+    counts = np.array([slot_counts(g, p) for g, p in zip(golds, preds)])
+    intent = np.array([intent_correct(g, p) for g, p in zip(golds, preds)], dtype=float)
+    overall = np.array([overall_correct(g, p) for g, p in zip(golds, preds)], dtype=float)
+    n = len(golds)
+    samples: dict[str, list[float]] = {"slot_f1": [], "intent_accuracy": [], "overall_accuracy": []}
+    for _ in range(n_resamples):
+        idx = rng.integers(0, n, n)
+        samples["slot_f1"].append(100 * _f1(*counts[idx].sum(axis=0).tolist()))
+        samples["intent_accuracy"].append(100 * intent[idx].mean())
+        samples["overall_accuracy"].append(100 * overall[idx].mean())
+    lo, hi = 100 * (1 - level) / 2, 100 * (1 + level) / 2
+    return {k: [float(np.percentile(v, lo)), float(np.percentile(v, hi))] for k, v in samples.items()}
+
+
+def mcnemar_exact(correct_a: list[bool], correct_b: list[bool]) -> dict[str, float]:
+    """Exact two-sided McNemar test on paired per-utterance correctness."""
+    only_a = sum(a and not b for a, b in zip(correct_a, correct_b))
+    only_b = sum(b and not a for a, b in zip(correct_a, correct_b))
+    n = only_a + only_b
+    if n == 0:
+        return {"only_a": 0, "only_b": 0, "p_value": 1.0}
+    tail = sum(comb(n, k) for k in range(min(only_a, only_b) + 1)) / 2**n
+    return {"only_a": only_a, "only_b": only_b, "p_value": min(1.0, 2 * tail)}
+
+
+def error_analysis(golds: list[Frame], preds: list[Frame]) -> dict[str, Any]:
+    """Where the errors are: intent-count confusion and per-slot-type scores."""
+    count_confusion: Counter[str] = Counter()
+    per_slot: dict[str, list[int]] = {}
+    missed_intents: Counter[str] = Counter()
+    spurious_intents: Counter[str] = Counter()
+    boundary_errors = 0  # predicted span has the right type and overlaps a gold span
+
+    for gold, pred in zip(golds, preds):
+        count_confusion[f"gold={len(gold.intents)},pred={len(pred.intents)}"] += 1
+        missed_intents.update(gold.intents - pred.intents)
+        spurious_intents.update(pred.intents - gold.intents)
+        for span in gold.slots & pred.slots:
+            per_slot.setdefault(span[2], [0, 0, 0])[0] += 1
+        for span in pred.slots - gold.slots:
+            per_slot.setdefault(span[2], [0, 0, 0])[1] += 1
+            if any(g[2] == span[2] and g[0] < span[1] and span[0] < g[1] for g in gold.slots):
+                boundary_errors += 1
+        for span in gold.slots - pred.slots:
+            per_slot.setdefault(span[2], [0, 0, 0])[2] += 1
+
+    slots = {
+        name: {"tp": tp, "fp": fp, "fn": fn, "f1": round(100 * _f1(tp, fp, fn), 2)}
+        for name, (tp, fp, fn) in per_slot.items()
+    }
+    worst = sorted(slots.items(), key=lambda kv: -(kv[1]["fp"] + kv[1]["fn"]))[:15]
+    return {
+        "intent_count_confusion": dict(sorted(count_confusion.items())),
+        "most_missed_intents": dict(missed_intents.most_common(10)),
+        "most_spurious_intents": dict(spurious_intents.most_common(10)),
+        "slot_boundary_errors": boundary_errors,
+        "slot_types_with_most_errors": dict(worst),
     }

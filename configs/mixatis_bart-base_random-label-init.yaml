@@ -1,0 +1,13 @@
+base: _base.yaml
+experiment_name: mixatis_bart-base_random-label-init
+dataset: mixatis
+
+data:
+  train_path: data/raw/mixatis/train.txt
+  dev_path: data/raw/mixatis/dev.txt
+  test_path: data/raw/mixatis/test.txt
+
+# Ablation: label embeddings keep their random initialisation.
+model:
+  backbone: facebook/bart-base
+  label_init: random

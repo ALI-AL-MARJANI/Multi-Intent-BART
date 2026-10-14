@@ -1,116 +1,135 @@
 #!/usr/bin/env python3
-"""GEMIS training entry point.
+"""Train GEMIS for one (config, seed) pair.
 
-Usage:
-    python scripts/train.py --config configs/mixatis.yaml
+    python scripts/train.py --config configs/mixatis_bart-base.yaml --seed 13
+
+Writes ``checkpoints/<experiment>/seed<seed>/{best,last}.pt`` and
+``results/nlu/<experiment>/seed<seed>_train.json`` (config, environment,
+per-epoch dev metrics).
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import sys
 from pathlib import Path
 
-from torch.utils.data import DataLoader
-from transformers import BartTokenizerFast
-
-from gemis.data.collator import GEMISDataCollator
-from gemis.data.dataset import GEMISDataset
-from gemis.models.gemis import GEMISModel
+from gemis.experiment import build_model, load_experiment, load_splits, make_loader, run_name
 from gemis.training.trainer import GEMISTrainer
-from gemis.utils.io import load_config
-from gemis.utils.training_utils import collect_labels, set_seed
+from gemis.utils.env import collect_env
+from gemis.utils.io import write_json
+from gemis.utils.training_utils import resolve_device, set_seed
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s — %(message)s",
-)
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("train")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train GEMIS")
-    parser.add_argument("--config", required=True, type=Path, help="Path to YAML config")
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--config", required=True, type=Path)
+    parser.add_argument("--seed", required=True, type=int)
+    parser.add_argument("--resume", action="store_true", help="continue from last.pt if it exists")
+    parser.add_argument("--max_train_samples", type=int, default=None, help="debugging only")
+    parser.add_argument("--max_epochs", type=int, default=None, help="debugging only")
     args = parser.parse_args()
 
-    cfg = load_config(args.config)
-    set_seed(cfg["training"]["seed"])
+    cfg = load_experiment(args.config)
+    train_cfg, data_cfg = cfg["training"], cfg["data"]
+    if args.max_epochs is not None:
+        train_cfg["max_epochs"] = args.max_epochs
+    debug = args.max_train_samples is not None or args.max_epochs is not None
 
-    logger.info("=== GEMIS Training — %s ===", cfg["experiment_name"])
+    set_seed(args.seed)
+    device = resolve_device(train_cfg["device"])
+    name = run_name(cfg, args.seed)
+    logger.info("run %s on %s", name, device)
 
-    # ── collect labels from training data ─────────────────────────────────────
-    data_cfg = cfg["data"]
-    all_data_paths = [
-        Path(data_cfg["train_path"]),
-        Path(data_cfg["dev_path"]),
-        Path(data_cfg["test_path"]),
-    ]
-    intent_labels, slot_labels = collect_labels(all_data_paths)
-    logger.info("Found %d intent types, %d slot types", len(intent_labels), len(slot_labels))
-
-    # ── tokenizer ─────────────────────────────────────────────────────────────
-    backbone = cfg["model"]["backbone"]
-    tokenizer = BartTokenizerFast.from_pretrained(backbone)
-    # Vocabulary extension happens inside GEMISModel.__init__
-
-    # ── model ─────────────────────────────────────────────────────────────────
-    model = GEMISModel(
-        backbone_name=backbone,
-        intent_labels=intent_labels,
-        slot_labels=slot_labels,
-        tokenizer=tokenizer,
-        mlp_hidden=cfg["model"]["mlp_hidden"],
-    )
-    n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    logger.info("Trainable parameters: %s", f"{n_params:,}")
-
-    # ── datasets & loaders ────────────────────────────────────────────────────
-    train_ds = GEMISDataset(
-        data_cfg["train_path"], tokenizer,
-        max_source_length=data_cfg["max_source_length"],
-        max_target_length=data_cfg["max_target_length"],
-    )
-    dev_ds = GEMISDataset(
-        data_cfg["dev_path"], tokenizer,
-        max_source_length=data_cfg["max_source_length"],
-        max_target_length=data_cfg["max_target_length"],
+    splits = load_splits(cfg)
+    if args.max_train_samples is not None:
+        splits["train"] = splits["train"][: args.max_train_samples]
+    model, tokenizer = build_model(cfg, splits["train"])
+    n_parameters = sum(p.numel() for p in model.parameters())
+    logger.info(
+        "%d train / %d dev utterances, %d intents, %d slot types, %.1fM parameters",
+        len(splits["train"]),
+        len(splits["dev"]),
+        len(model.label_space.intents),
+        len(model.label_space.slots),
+        n_parameters / 1e6,
     )
 
-    collator = GEMISDataCollator(tokenizer=tokenizer)
-    train_cfg = cfg["training"]
-
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=train_cfg["batch_size"],
-        shuffle=True,
-        collate_fn=collator,
-        num_workers=4,
-        pin_memory=True,
+    train_loader = make_loader(
+        splits["train"],
+        model,
+        tokenizer,
+        train_cfg["batch_size"],
+        data_cfg["max_source_length"],
+        train=True,
+        pad_to_multiple_of=data_cfg["pad_to_multiple_of"],
     )
-    dev_loader = DataLoader(
-        dev_ds,
-        batch_size=train_cfg["batch_size"],
-        shuffle=False,
-        collate_fn=collator,
-        num_workers=2,
+    dev_loader = make_loader(
+        splits["dev"],
+        model,
+        tokenizer,
+        train_cfg["eval_batch_size"],
+        data_cfg["max_source_length"],
+        pad_to_multiple_of=data_cfg["pad_to_multiple_of"],
     )
 
-    # ── trainer ───────────────────────────────────────────────────────────────
+    checkpoint_dir = Path(cfg["output"]["checkpoint_dir"]) / name
     trainer = GEMISTrainer(
-        model=model,
-        train_loader=train_loader,
-        dev_loader=dev_loader,
+        model,
+        train_loader,
+        dev_loader,
+        checkpoint_dir,
+        device,
         learning_rate=train_cfg["learning_rate"],
-        num_epochs=train_cfg["max_epochs"],
-        warmup_steps=train_cfg["warmup_steps"],
-        output_dir=cfg["output"]["checkpoint_dir"],
-        device=train_cfg["device"],
+        weight_decay=train_cfg["weight_decay"],
+        max_epochs=train_cfg["max_epochs"],
+        warmup_ratio=train_cfg["warmup_ratio"],
         gradient_clip=train_cfg["gradient_clip"],
-        gradient_accumulation_steps=train_cfg.get("gradient_accumulation_steps", 1),
+        gradient_accumulation_steps=train_cfg["gradient_accumulation_steps"],
+        early_stopping_patience=train_cfg["early_stopping_patience"],
+        mixed_precision=train_cfg["mixed_precision"],
+        max_new_tokens=train_cfg["max_new_tokens"],
+        run_config={"config": cfg, "seed": args.seed},
+        show_progress=sys.stderr.isatty(),
     )
+    resumed_from_epoch = None
+    if args.resume and (checkpoint_dir / "last.pt").exists():
+        trainer.resume(checkpoint_dir / "last.pt")
+        resumed_from_epoch = trainer.epoch
 
-    trainer.train()
-    logger.info("Training complete. Best overall accuracy: %.2f", trainer.best_overall_acc)
+    suffix = "_debug" if debug else ""
+    out_path = Path(cfg["output"]["results_dir"]) / f"{name}_train{suffix}.json"
+    if trainer.finished and out_path.exists():
+        # nothing is trained: keep the file (environment, resume epoch) written by the run that did the training
+        logger.info("%s is already finished; %s left unchanged", name, out_path)
+        return
+
+    history = trainer.train()
+    write_json(
+        {
+            "experiment": cfg["experiment_name"],
+            "seed": args.seed,
+            "debug_run": debug,
+            "config": cfg,
+            "env": collect_env(device),
+            "n_parameters": n_parameters,
+            "n_train": len(splits["train"]),
+            "n_dev": len(splits["dev"]),
+            "dropped_spans_train": train_loader.dataset.n_dropped_spans,
+            "pointer_alpha": model.pointer.alpha.item(),
+            "best_epoch": trainer.best_epoch,
+            "best_dev_overall_accuracy": trainer.best_metric,
+            "resumed_from_epoch": resumed_from_epoch,
+            "train_seconds": round(sum(h["seconds"] for h in history), 1),
+            "history": history,
+        },
+        out_path,
+    )
+    logger.info("best dev overall accuracy %.2f at epoch %d -> %s", trainer.best_metric, trainer.best_epoch, out_path)
 
 
 if __name__ == "__main__":

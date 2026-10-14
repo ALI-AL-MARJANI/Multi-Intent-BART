@@ -1,110 +1,114 @@
 #!/usr/bin/env python3
-"""Evaluate a trained GEMIS checkpoint on a test set.
+"""Evaluate a trained checkpoint with greedy decoding.
 
-Usage:
-    python scripts/evaluate.py \\
-        --checkpoint checkpoints/mixatis/best.pt \\
-        --config     configs/mixatis.yaml
+    python scripts/evaluate.py --config configs/mixatis_bart-base.yaml --seed 13
+
+Writes ``results/nlu/<experiment>/seed<seed>_<split>.json`` (metrics, bootstrap
+intervals, error analysis, environment) and a ``_predictions.jsonl`` file with
+one gold/predicted frame per utterance.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
+import time
 from pathlib import Path
 
-import torch
-from torch.utils.data import DataLoader
-from transformers import BartTokenizerFast
-
-from gemis.data.collator import GEMISDataCollator
-from gemis.data.dataset import GEMISDataset
+from gemis.experiment import load_experiment, load_splits, make_loader, run_name
 from gemis.models.gemis import GEMISModel
-from gemis.training.metrics import Frame, compute_metrics, parse_target_sequence  # noqa: F401
-from gemis.utils.io import load_config
-from gemis.utils.training_utils import collect_labels, set_seed
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(name)s — %(message)s",
+from gemis.training.evaluation import predict_frames
+from gemis.training.metrics import (
+    bootstrap_ci,
+    compute_metrics,
+    error_analysis,
+    intent_correct,
+    overall_correct,
 )
-logger = logging.getLogger(__name__)
+from gemis.utils.env import collect_env
+from gemis.utils.io import write_json
+from gemis.utils.training_utils import resolve_device, set_seed
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("evaluate")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate GEMIS checkpoint")
-    parser.add_argument("--checkpoint", required=True, type=Path)
-    parser.add_argument("--config",     required=True, type=Path)
-    parser.add_argument("--split",      default="test", choices=["dev", "test"])
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--config", required=True, type=Path)
+    parser.add_argument("--seed", required=True, type=int)
+    parser.add_argument("--split", default="test", choices=["dev", "test"])
+    parser.add_argument("--checkpoint", type=Path, default=None, help="default: best.pt of the run")
+    parser.add_argument("--tag", default="", help="suffix for the output files (e.g. _debug)")
     args = parser.parse_args()
 
-    cfg = load_config(args.config)
-    set_seed(cfg["training"]["seed"])
-    device = torch.device(cfg["training"]["device"] if torch.cuda.is_available() else "cpu")
+    cfg = load_experiment(args.config)
+    set_seed(args.seed)
+    device = resolve_device(cfg["training"]["device"])
+    name = run_name(cfg, args.seed)
+    checkpoint_path = args.checkpoint or Path(cfg["output"]["checkpoint_dir"]) / name / "best.pt"
 
-    data_cfg = cfg["data"]
-    split_path = data_cfg[f"{args.split}_path"]
-
-    # ── collect labels ────────────────────────────────────────────────────────
-    all_data_paths = [
-        Path(data_cfg["train_path"]),
-        Path(data_cfg["dev_path"]),
-        Path(data_cfg["test_path"]),
-    ]
-    intent_labels, slot_labels = collect_labels(all_data_paths)
-
-    # ── tokenizer + model ─────────────────────────────────────────────────────
-    backbone = cfg["model"]["backbone"]
-    tokenizer = BartTokenizerFast.from_pretrained(backbone)
-    model = GEMISModel(
-        backbone_name=backbone,
-        intent_labels=intent_labels,
-        slot_labels=slot_labels,
-        tokenizer=tokenizer,
-        mlp_hidden=cfg["model"]["mlp_hidden"],
-    )
-
-    checkpoint = torch.load(args.checkpoint, map_location=device)
-    model.load_state_dict(checkpoint["model_state_dict"])
+    model, tokenizer, checkpoint = GEMISModel.from_checkpoint(checkpoint_path)
     model.to(device)
-    model.eval()
-    logger.info("Loaded checkpoint: %s", args.checkpoint)
-
-    # ── dataloader ────────────────────────────────────────────────────────────
-    ds = GEMISDataset(
-        split_path, tokenizer,
-        max_source_length=data_cfg["max_source_length"],
-        max_target_length=data_cfg["max_target_length"],
+    samples = load_splits(cfg)[args.split]
+    loader = make_loader(
+        samples,
+        model,
+        tokenizer,
+        cfg["training"]["eval_batch_size"],
+        cfg["data"]["max_source_length"],
+        pad_to_multiple_of=cfg["data"]["pad_to_multiple_of"],
     )
-    collator = GEMISDataCollator(tokenizer=tokenizer)
-    loader = DataLoader(ds, batch_size=cfg["training"]["batch_size"],
-                        shuffle=False, collate_fn=collator)
 
-    # ── inference ────────────────────────────────────────────────────────────
-    golds: list[Frame] = []
-    preds: list[Frame] = []
-
-    with torch.no_grad():
-        for batch in loader:
-            batch = {k: v.to(device) for k, v in batch.items()}
-
-            generated = model.generate(
-                input_ids=batch["input_ids"],
-                attention_mask=batch["attention_mask"],
-            )
-            for i, gen_ids in enumerate(generated):
-                gold_ids = [t for t in batch["labels"][i].tolist() if t != -100]
-                golds.append(parse_target_sequence(gold_ids, tokenizer))
-                preds.append(parse_target_sequence(gen_ids, tokenizer))
-
-    # ── report ────────────────────────────────────────────────────────────────
+    started = time.time()
+    golds, preds, words = predict_frames(model, loader, device, cfg["training"]["max_new_tokens"])
+    seconds = time.time() - started
     metrics = compute_metrics(golds, preds)
-    print(f"\n{'='*40}")
-    print(f"  Dataset : {cfg['experiment_name']} ({args.split})")
-    print(f"  Slot F1 : {metrics['slot_f1']:.2f}")
-    print(f"  Intent Accuracy  : {metrics['intent_accuracy']:.2f}")
-    print(f"  Overall Accuracy : {metrics['overall_accuracy']:.2f}")
-    print(f"{'='*40}\n")
+
+    out_dir = Path(cfg["output"]["results_dir"]) / cfg["experiment_name"]
+    stem = f"seed{args.seed}_{args.split}{args.tag}"
+    predictions_path = out_dir / f"{stem}_predictions.jsonl"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with open(predictions_path, "w", encoding="utf-8") as f:
+        for gold, pred, utterance in zip(golds, preds, words):
+            row = {
+                "text": " ".join(utterance),
+                "gold": gold.to_json(),
+                "pred": pred.to_json(),
+                "intent_correct": intent_correct(gold, pred),
+                "overall_correct": overall_correct(gold, pred),
+            }
+            f.write(json.dumps(row) + "\n")
+
+    write_json(
+        {
+            "experiment": cfg["experiment_name"],
+            "seed": args.seed,
+            "split": args.split,
+            "n_utterances": len(golds),
+            "metrics": metrics,
+            "bootstrap_ci95": bootstrap_ci(golds, preds),
+            "error_analysis": error_analysis(golds, preds),
+            "checkpoint": str(checkpoint_path),
+            "checkpoint_epoch": checkpoint["best_epoch"],
+            "decode_seconds": round(seconds, 1),
+            "utterances_per_second": round(len(golds) / seconds, 1),
+            "predictions_file": predictions_path.name,
+            "config": cfg,
+            "env": collect_env(device),
+        },
+        out_dir / f"{stem}.json",
+    )
+    logger.info(
+        "%s %s: slot F1 %.2f | intent acc %.2f | overall acc %.2f (n=%d)",
+        name,
+        args.split,
+        metrics["slot_f1"],
+        metrics["intent_accuracy"],
+        metrics["overall_accuracy"],
+        len(golds),
+    )
 
 
 if __name__ == "__main__":
