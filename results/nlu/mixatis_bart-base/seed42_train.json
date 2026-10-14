@@ -1,0 +1,148 @@
+{
+  "experiment": "mixatis_bart-base",
+  "seed": 42,
+  "debug_run": false,
+  "config": {
+    "model": {
+      "backbone": "facebook/bart-base",
+      "mlp_hidden": 512,
+      "use_aoa": true,
+      "use_pointer": true,
+      "label_init": "subword_mean"
+    },
+    "data": {
+      "max_source_length": 128,
+      "max_position_classes": 128,
+      "pad_to_multiple_of": 8,
+      "holdout_intents": [],
+      "train_path": "data/raw/mixatis/train.txt",
+      "dev_path": "data/raw/mixatis/dev.txt",
+      "test_path": "data/raw/mixatis/test.txt"
+    },
+    "training": {
+      "learning_rate": 2e-05,
+      "weight_decay": 0.01,
+      "batch_size": 16,
+      "gradient_accumulation_steps": 1,
+      "max_epochs": 30,
+      "early_stopping_patience": 5,
+      "warmup_ratio": 0.01,
+      "gradient_clip": 1.0,
+      "mixed_precision": false,
+      "eval_batch_size": 64,
+      "max_new_tokens": 96,
+      "device": "auto"
+    },
+    "seeds": [
+      13,
+      42,
+      87
+    ],
+    "ood": {
+      "far_ood_path": "data/ood/clinc150_oos_test.txt",
+      "feature_bank_size": 10000,
+      "knn_k": 10
+    },
+    "output": {
+      "checkpoint_dir": "checkpoints",
+      "results_dir": "results/nlu"
+    },
+    "experiment_name": "mixatis_bart-base",
+    "dataset": "mixatis"
+  },
+  "env": {
+    "date_utc": "2026-10-12T01:09:08+00:00",
+    "code_sha256": "faad7d02f5e917f732d65a19058ce54248519649a61f3cfae005c1043de66375",
+    "git_sha": null,
+    "python": "3.12.12",
+    "platform": "macOS-15.6.1-arm64-arm-64bit",
+    "processor": "arm",
+    "cpu_count": 10,
+    "memory_gb": 16.0,
+    "gpu": null,
+    "device": "mps",
+    "versions": {
+      "torch": "2.8.0",
+      "transformers": "4.57.1",
+      "tokenizers": "0.22.2",
+      "numpy": "2.5.4",
+      "scipy": "1.18.1",
+      "scikit-learn": "1.9.1"
+    }
+  },
+  "n_parameters": 140278017,
+  "n_train": 13162,
+  "n_dev": 759,
+  "dropped_spans_train": 0,
+  "pointer_alpha": 0.5025481581687927,
+  "best_epoch": 3,
+  "best_dev_overall_accuracy": 88.40579710144928,
+  "resumed_from_epoch": 3,
+  "train_seconds": 4251.2,
+  "history": [
+    {
+      "epoch": 1,
+      "train_loss": 1.0104538652398607,
+      "dev_slot_f1": 94.20289855072464,
+      "dev_intent_accuracy": 93.41238471673255,
+      "dev_overall_accuracy": 73.78129117259552,
+      "seconds": 531.2
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.04766850767771454,
+      "dev_slot_f1": 97.07774798927615,
+      "dev_intent_accuracy": 94.07114624505928,
+      "dev_overall_accuracy": 84.58498023715416,
+      "seconds": 502.1
+    },
+    {
+      "epoch": 3,
+      "train_loss": 0.01733369695335029,
+      "dev_slot_f1": 98.06918744971841,
+      "dev_intent_accuracy": 94.59815546772069,
+      "dev_overall_accuracy": 88.40579710144928,
+      "seconds": 511.2
+    },
+    {
+      "epoch": 4,
+      "train_loss": 0.007564435836339634,
+      "dev_slot_f1": 98.0823387421215,
+      "dev_intent_accuracy": 93.8076416337286,
+      "dev_overall_accuracy": 88.01054018445323,
+      "seconds": 519.5
+    },
+    {
+      "epoch": 5,
+      "train_loss": 0.004350998824458617,
+      "dev_slot_f1": 97.84384625686353,
+      "dev_intent_accuracy": 93.93939393939394,
+      "dev_overall_accuracy": 86.29776021080369,
+      "seconds": 548.8
+    },
+    {
+      "epoch": 6,
+      "train_loss": 0.003790934639498405,
+      "dev_slot_f1": 97.52442124983273,
+      "dev_intent_accuracy": 94.33465085638998,
+      "dev_overall_accuracy": 84.84848484848484,
+      "seconds": 559.4
+    },
+    {
+      "epoch": 7,
+      "train_loss": 0.006337167174001009,
+      "dev_slot_f1": 97.79027721976698,
+      "dev_intent_accuracy": 94.59815546772069,
+      "dev_overall_accuracy": 86.95652173913044,
+      "seconds": 548.6
+    },
+    {
+      "epoch": 8,
+      "train_loss": 0.0042972284503585804,
+      "dev_slot_f1": 97.65321174735149,
+      "dev_intent_accuracy": 93.67588932806323,
+      "dev_overall_accuracy": 87.08827404479578,
+      "seconds": 530.4
+    }
+  ]
+}
